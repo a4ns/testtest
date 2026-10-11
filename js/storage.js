@@ -10,6 +10,8 @@
     settings: 'lgtetris.settings.v1',
     records: 'lgtetris.records.v1',
     profile: 'lgtetris.profile.v1',
+    daily: 'lgtetris.daily.v1',
+    save: 'lgtetris.save.v1.', // + mode
   };
 
   const ACTIONS = ['left', 'right', 'soft', 'hard', 'cw', 'ccw', 'r180', 'hold'];
@@ -64,7 +66,7 @@
     bindings: DEFAULT_BINDINGS,
   };
 
-  const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'zen'];
+  const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'zen', 'daily'];
 
   const ACHIEVEMENTS = [
     { id: 'first-line', name: 'First Light', desc: 'Clear your first line.' },
@@ -87,6 +89,9 @@
     { id: 'ultra60k', name: 'Ultra 60K', desc: 'Score 60,000 in Ultra.' },
     { id: 'zen200', name: 'Still Water', desc: 'Clear 200 lines in one Zen session.' },
     { id: 'lines1000', name: 'Architect', desc: 'Clear 1,000 lines in total.' },
+    { id: 'daily', name: 'Daily Ritual', desc: 'Finish a Daily Challenge.' },
+    { id: 'streak3', name: 'Habit', desc: 'Play the Daily Challenge 3 days in a row.' },
+    { id: 'streak7', name: 'Devotion', desc: 'Play the Daily Challenge 7 days in a row.' },
   ];
 
   function load(key) {
@@ -120,15 +125,46 @@
     return out;
   }
 
+  // Allowed values for everything read back from storage.
+  const RANGES = {
+    das: [50, 300],
+    arr: [0, 100],
+    sdf: [5, SDF_INFINITE],
+    previews: [1, 5],
+    startLevel: [1, 15],
+    master: [0, 1],
+    music: [0, 1],
+    sfx: [0, 1],
+  };
+  const CHOICES = {
+    track: ['glass', 'classic', 'off'],
+    wallpaper: ['auto', 'aurora', 'sunset', 'lagoon', 'graphite', 'daylight'],
+    glass: ['high', 'standard', 'low'],
+    touch: ['gestures', 'buttons'],
+  };
+
+  function validSetting(k, v) {
+    if (typeof v !== typeof DEFAULT_SETTINGS[k]) return false;
+    if (typeof v === 'number') {
+      if (!isFinite(v)) return false;
+      const r = RANGES[k];
+      return !r || (v >= r[0] && v <= r[1]);
+    }
+    if (CHOICES[k]) return CHOICES[k].indexOf(v) !== -1;
+    return true;
+  }
+
   function loadSettings() {
     const saved = load(KEYS.settings);
     const s = Object.assign({}, DEFAULT_SETTINGS);
     if (isPlainObject(saved)) {
       for (const k of Object.keys(DEFAULT_SETTINGS)) {
         if (k === 'bindings') continue;
-        if (k in saved && typeof saved[k] === typeof DEFAULT_SETTINGS[k]) s[k] = saved[k];
+        if (k in saved && validSetting(k, saved[k])) s[k] = saved[k];
       }
     }
+    if (s.previews !== Math.round(s.previews)) s.previews = DEFAULT_SETTINGS.previews;
+    if (s.startLevel !== Math.round(s.startLevel)) s.startLevel = DEFAULT_SETTINGS.startLevel;
     s.bindings = sanitizeBindings(saved && saved.bindings);
     return s;
   }
@@ -151,11 +187,20 @@
     return r;
   }
 
+  const finite = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
+
+  function validRun(run) {
+    return isPlainObject(run) && ['score', 'lines', 'level', 'time', 'pieces', 'date'].every((k) => finite(run[k]));
+  }
+
   function loadRecords() {
     const saved = load(KEYS.records);
     const r = emptyRecords();
     if (isPlainObject(saved)) {
-      for (const m of MODE_ORDER) if (Array.isArray(saved[m])) r[m] = saved[m].filter(isPlainObject).slice(0, 10);
+      for (const m of MODE_ORDER) {
+        if (!Array.isArray(saved[m])) continue;
+        r[m] = saved[m].filter(validRun).sort((a, b) => compareRuns(m, a, b)).slice(0, 10);
+      }
     }
     return r;
   }
@@ -198,7 +243,9 @@
     };
     if (isPlainObject(saved)) {
       for (const k of Object.keys(p)) {
-        if (k in saved && typeof saved[k] === typeof p[k]) p[k] = saved[k];
+        if (!(k in saved) || typeof saved[k] !== typeof p[k]) continue;
+        if (typeof p[k] === 'number' && !finite(saved[k])) continue;
+        p[k] = saved[k];
       }
       if (!isPlainObject(p.achievements)) p.achievements = {};
     }
@@ -207,6 +254,69 @@
 
   function saveProfile(p) {
     save(KEYS.profile, p);
+  }
+
+  // ---- resumable runs (Marathon, Zen) ----------------------------------
+
+  function loadSave(mode) {
+    const v = load(KEYS.save + mode);
+    return isPlainObject(v) && isPlainObject(v.game) ? v : null;
+  }
+
+  function writeSave(mode, data) {
+    return save(KEYS.save + mode, data);
+  }
+
+  function clearSave(mode) {
+    try {
+      root.localStorage.removeItem(KEYS.save + mode);
+    } catch (e) {
+      /* storage unavailable */
+    }
+  }
+
+  // ---- daily challenge -------------------------------------------------
+
+  function dayKey(date) {
+    const d = date || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function previousDay(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    return dayKey(new Date(y, m - 1, d - 1));
+  }
+
+  function loadDaily() {
+    const v = load(KEYS.daily);
+    const out = { days: {}, streak: 0, lastDay: '' };
+    if (isPlainObject(v)) {
+      if (isPlainObject(v.days)) {
+        for (const k of Object.keys(v.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && finite(v.days[k])) out.days[k] = v.days[k];
+      }
+      if (finite(v.streak)) out.streak = Math.floor(v.streak);
+      if (typeof v.lastDay === 'string') out.lastDay = v.lastDay;
+    }
+    return out;
+  }
+
+  /** Records a finished daily run; returns the updated daily state. */
+  function recordDaily(daily, key, score) {
+    daily.days[key] = Math.max(daily.days[key] || 0, score);
+    if (daily.lastDay !== key) {
+      daily.streak = daily.lastDay === previousDay(key) ? daily.streak + 1 : 1;
+      daily.lastDay = key;
+    }
+    // Keep the file small: only the last 60 days.
+    const keys = Object.keys(daily.days).sort();
+    while (keys.length > 60) delete daily.days[keys.shift()];
+    save(KEYS.daily, daily);
+    return daily;
+  }
+
+  /** The streak still counts if the last daily was today or yesterday. */
+  function liveStreak(daily, today) {
+    return daily.lastDay === today || daily.lastDay === previousDay(today) ? daily.streak : 0;
   }
 
   root.TetrisStorage = {
@@ -227,5 +337,13 @@
     compareRuns,
     loadProfile,
     saveProfile,
+    loadSave,
+    writeSave,
+    clearSave,
+    dayKey,
+    previousDay,
+    loadDaily,
+    recordDaily,
+    liveStreak,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -36,6 +36,7 @@
   </head>
   <body>
     <canvas id="wallpaper" class="wallpaper" aria-hidden="true"></canvas>
+    <canvas id="wallpaper-fx" class="wallpaper wallpaper-fx" aria-hidden="true"></canvas>
     <div class="grain" id="grain" aria-hidden="true"></div>
     <svg class="svg-defs" aria-hidden="true" focusable="false"><defs id="lens-defs"></defs></svg>
 
@@ -54,6 +55,8 @@
       <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6.5l-1 8 8.5-11h-6.5z" fill="currentColor" /></symbol>
       <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 13.5V9.5M9.5 2.8h5M18.5 6l1.5-1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></symbol>
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" fill="currentColor" /></symbol>
+      <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><circle cx="12" cy="15" r="1.8" fill="currentColor" /></symbol>
+      <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 2.5c.6 3.2-1.2 4.9-2.8 6.6C7.6 10.8 6 12.6 6 15.3A6 6 0 0 0 12 21.5a6 6 0 0 0 6-6.2c0-2.6-1.3-4.3-2.4-5.6-.2 1.6-.9 2.6-2 3.1.4-3.6-.2-7.4-1.6-10.3z" fill="currentColor" /></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.2 2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.5l-5.4 2.9 1.2-5.9-4.4-4.1 6-.7z" fill="currentColor" /></symbol>
       <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
@@ -134,7 +137,20 @@
         <h1 class="visually-hidden" id="menu-title">Liquid Glass Tetris</h1>
         <canvas id="logo-canvas" class="logo" aria-hidden="true"></canvas>
         <p class="tagline">Liquid Glass</p>
+        <div class="glass continue" id="continue" hidden>
+          <button class="continue-main" type="button" id="btn-continue">
+            <span class="continue-icon" aria-hidden="true"><svg><use href="#i-play" /></svg></span>
+            <span class="continue-text"><b id="continue-title">Continue Marathon</b><small id="continue-detail"></small></span>
+          </button>
+          <button class="icon-btn continue-discard" type="button" id="btn-discard" aria-label="Discard saved game" title="Discard saved game"><svg aria-hidden="true"><use href="#i-close" /></svg></button>
+        </div>
         <div class="mode-grid">
+          <button class="glass mode-card mode-daily" type="button" data-mode="daily" style="--tint: #ffb340">
+            <span class="mode-icon" aria-hidden="true"><svg><use href="#i-calendar" /></svg></span>
+            <span class="mode-name">Daily Challenge <span class="daily-date" id="daily-date"></span></span>
+            <span class="mode-desc">Today’s pieces, the same for everyone. Two minutes. Come back tomorrow for new ones.</span>
+            <span class="mode-best"><span id="daily-streak">Today’s best</span><b data-best="daily">—</b></span>
+          </button>
           <button class="glass mode-card" type="button" data-mode="marathon" style="--tint: #64d2ff">
             <span class="mode-icon" aria-hidden="true"><svg><use href="#i-infinity" /></svg></span>
             <span class="mode-name">Marathon</span>
@@ -170,7 +186,7 @@
     </section>
 
     <!-- =========================================================== PAUSE -->
-    <section class="screen" id="screen-pause" aria-labelledby="pause-title">
+    <section class="screen" id="screen-pause" role="dialog" aria-modal="true" aria-labelledby="pause-title">
       <div class="glass sheet sheet-sm">
         <p class="eyebrow" id="pause-mode">Marathon</p>
         <h2 id="pause-title">Paused</h2>
@@ -184,12 +200,13 @@
     </section>
 
     <!-- ========================================================= RESULTS -->
-    <section class="screen" id="screen-results" aria-labelledby="res-title">
+    <section class="screen" id="screen-results" role="dialog" aria-modal="true" aria-labelledby="res-title">
       <div class="glass sheet">
         <p class="eyebrow" id="res-mode">Marathon</p>
         <h2 id="res-title">Game Over</h2>
         <div class="res-main"><span class="num" id="res-main">0</span><span class="res-main-label" id="res-main-label">points</span></div>
         <div id="res-badge-slot"></div>
+        <div class="res-unlocks" id="res-unlocks" aria-label="Achievements unlocked this run" hidden></div>
         <dl class="res-stats" id="res-stats"></dl>
         <ol class="board-list" id="res-board" aria-label="Personal leaderboard"></ol>
         <div class="sheet-actions row">
@@ -200,7 +217,7 @@
     </section>
 
     <!-- ======================================================== SETTINGS -->
-    <section class="screen modal" id="screen-settings" aria-labelledby="settings-title">
+    <section class="screen modal" id="screen-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="glass sheet sheet-lg">
         <header class="sheet-head">
           <h2 id="settings-title">Settings</h2>
@@ -209,18 +226,18 @@
         <div class="segmented tabs" role="tablist" aria-label="Settings sections" data-tabs="settings">
           <span class="seg-lens" aria-hidden="true"></span>
           <button type="button" role="tab" id="tab-game" aria-controls="panel-game" aria-selected="true">Game</button>
-          <button type="button" role="tab" id="tab-controls" aria-controls="panel-controls" aria-selected="false">Controls</button>
-          <button type="button" role="tab" id="tab-audio" aria-controls="panel-audio" aria-selected="false">Sound</button>
-          <button type="button" role="tab" id="tab-look" aria-controls="panel-look" aria-selected="false">Look</button>
+          <button type="button" role="tab" id="tab-controls" aria-controls="panel-controls" aria-selected="false" tabindex="-1">Controls</button>
+          <button type="button" role="tab" id="tab-audio" aria-controls="panel-audio" aria-selected="false" tabindex="-1">Sound</button>
+          <button type="button" role="tab" id="tab-look" aria-controls="panel-look" aria-selected="false" tabindex="-1">Look</button>
         </div>
 
         <div class="tab-panel" role="tabpanel" id="panel-game" aria-labelledby="tab-game">
           <div class="rows">
             <div class="row">
-              <div class="row-label"><span id="lbl-startLevel">Starting level</span><small>Marathon and Ultra</small></div>
+              <div class="row-label"><span id="lbl-startLevel">Starting level</span><small>Marathon only</small></div>
               <div class="stepper" data-stepper="startLevel" data-min="1" data-max="15" aria-labelledby="lbl-startLevel">
                 <button type="button" data-step="-1" aria-label="Lower starting level">−</button>
-                <output class="num" id="out-startLevel">1</output>
+                <output class="num" id="out-startLevel" aria-live="polite">1</output>
                 <button type="button" data-step="1" aria-label="Raise starting level">+</button>
               </div>
             </div>
@@ -228,7 +245,7 @@
               <div class="row-label"><span id="lbl-previews">Next pieces shown</span></div>
               <div class="stepper" data-stepper="previews" data-min="1" data-max="5" aria-labelledby="lbl-previews">
                 <button type="button" data-step="-1" aria-label="Show fewer next pieces">−</button>
-                <output class="num" id="out-previews">5</output>
+                <output class="num" id="out-previews" aria-live="polite">5</output>
                 <button type="button" data-step="1" aria-label="Show more next pieces">+</button>
               </div>
             </div>
@@ -344,7 +361,7 @@
     </section>
 
     <!-- ============================================================ HELP -->
-    <section class="screen modal" id="screen-help" aria-labelledby="help-title">
+    <section class="screen modal" id="screen-help" role="dialog" aria-modal="true" aria-labelledby="help-title">
       <div class="glass sheet sheet-lg">
         <header class="sheet-head">
           <h2 id="help-title">How to play</h2>
@@ -353,8 +370,8 @@
         <div class="segmented tabs" role="tablist" aria-label="Help sections" data-tabs="help">
           <span class="seg-lens" aria-hidden="true"></span>
           <button type="button" role="tab" id="tab-h-keys" aria-controls="panel-h-keys" aria-selected="true">Keyboard</button>
-          <button type="button" role="tab" id="tab-h-touch" aria-controls="panel-h-touch" aria-selected="false">Touch</button>
-          <button type="button" role="tab" id="tab-h-score" aria-controls="panel-h-score" aria-selected="false">Scoring</button>
+          <button type="button" role="tab" id="tab-h-touch" aria-controls="panel-h-touch" aria-selected="false" tabindex="-1">Touch</button>
+          <button type="button" role="tab" id="tab-h-score" aria-controls="panel-h-score" aria-selected="false" tabindex="-1">Scoring</button>
         </div>
         <div class="tab-panel" role="tabpanel" id="panel-h-keys" aria-labelledby="tab-h-keys">
           <div class="rows help-grid" id="help-keys"></div>
@@ -375,12 +392,13 @@
           <p><strong>Back-to-Back</strong>: chain Tetrises and T-Spins without a plain clear in between for a 1.5× bonus. <strong>Combos</strong>: clear lines with consecutive pieces for +50 × combo × level.</p>
           <p><strong>Perfect Clear</strong>: empty the whole field for a huge bonus. Hard drops earn 2 points per row, soft drops 1.</p>
           <p><strong>Hold</strong> a piece for later, once per drop. The ghost shows where the piece will land.</p>
+          <p><strong>Daily Challenge</strong>: a new two-minute run every day with the same pieces for everyone. Play on consecutive days to build a streak. <strong>Sprint</strong> shows your pace against your best at every 10 lines.</p>
         </div>
       </div>
     </section>
 
     <!-- ========================================================= RECORDS -->
-    <section class="screen modal" id="screen-records" aria-labelledby="records-title">
+    <section class="screen modal" id="screen-records" role="dialog" aria-modal="true" aria-labelledby="records-title">
       <div class="glass sheet sheet-lg">
         <header class="sheet-head">
           <h2 id="records-title">Records</h2>
@@ -389,8 +407,8 @@
         <div class="segmented tabs" role="tablist" aria-label="Records" data-tabs="records">
           <span class="seg-lens" aria-hidden="true"></span>
           <button type="button" role="tab" id="tab-r-best" aria-controls="panel-r-best" aria-selected="true">Best runs</button>
-          <button type="button" role="tab" id="tab-r-ach" aria-controls="panel-r-ach" aria-selected="false">Achievements</button>
-          <button type="button" role="tab" id="tab-r-life" aria-controls="panel-r-life" aria-selected="false">Lifetime</button>
+          <button type="button" role="tab" id="tab-r-ach" aria-controls="panel-r-ach" aria-selected="false" tabindex="-1">Achievements</button>
+          <button type="button" role="tab" id="tab-r-life" aria-controls="panel-r-life" aria-selected="false" tabindex="-1">Lifetime</button>
         </div>
         <div class="tab-panel" role="tabpanel" id="panel-r-best" aria-labelledby="tab-r-best">
           <div class="segmented" data-seg="recordsMode" aria-label="Mode">
@@ -399,6 +417,7 @@
             <button type="button" data-value="sprint">Sprint</button>
             <button type="button" data-value="ultra">Ultra</button>
             <button type="button" data-value="zen">Zen</button>
+            <button type="button" data-value="daily">Daily</button>
           </div>
           <ol class="board-list" id="records-list"></ol>
         </div>
@@ -413,7 +432,7 @@
     </section>
 
     <!-- ====================================================== TOUCH HELP -->
-    <section class="screen modal" id="screen-touchhelp" aria-labelledby="touchhelp-title">
+    <section class="screen modal" id="screen-touchhelp" role="dialog" aria-modal="true" aria-labelledby="touchhelp-title">
       <div class="glass sheet sheet-sm">
         <h2 id="touchhelp-title">Touch controls</h2>
         <ul class="gesture-list">

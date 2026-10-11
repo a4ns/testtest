@@ -83,9 +83,14 @@
   }
 
   class Wallpaper {
-    constructor(canvas) {
+    constructor(canvas, fxCanvas) {
       this.canvas = canvas;
       this.ctx = canvas.getContext('2d', { alpha: false });
+      // A second, sharper layer holds the floating glass pieces, so the lensing
+      // and blur of the UI glass above have crisp edges to bend.
+      this.fx = fxCanvas || null;
+      this.fxCtx = fxCanvas ? fxCanvas.getContext('2d') : null;
+      this.sprites = [];
       this.scale = 0.16;
       this.energy = 0;
       this.danger = 0;
@@ -111,15 +116,70 @@
       for (let i = 0; i < 7; i++) {
         this.floaters.push({
           shape: SHAPES[i % 7],
-          x: seeded(i + 70),
+          x: 0.06 + seeded(i + 70) * 0.88,
           y: seeded(i + 80),
-          size: 0.05 + seeded(i + 90) * 0.06,
+          size: 0.045 + seeded(i + 90) * 0.05,
           rot: seeded(i + 100) * 6.28,
-          vr: (seeded(i + 110) - 0.5) * 0.00012,
-          vy: 0.000006 + seeded(i + 120) * 0.00001,
+          vr: (seeded(i + 110) - 0.5) * 0.0001,
+          vy: 0.000007 + seeded(i + 120) * 0.000009,
           c: i % 5,
         });
       }
+      this.buildSprites();
+    }
+
+    /** Pre-renders each floating piece as a sheet of clear glass. */
+    buildSprites() {
+      if (!this.fx || !this.fx.width) return;
+      const M = Math.max(this.fx.width, this.fx.height);
+      const light = this.theme.light;
+      this.sprites = this.floaters.map((f) => {
+        const cs = Math.max(8, f.size * M);
+        const xs = f.shape.map((c) => c[0]);
+        const ys = f.shape.map((c) => c[1]);
+        const cols = Math.max(...xs) + 1;
+        const rows = Math.max(...ys) + 1;
+        const pad = cs * 0.2;
+        const cv = document.createElement('canvas');
+        cv.width = Math.ceil(cols * cs + pad * 2);
+        cv.height = Math.ceil(rows * cs + pad * 2);
+        const g = cv.getContext('2d');
+        const [h, sat, l] = this.blobHsl[f.c];
+        const inset = cs * 0.05;
+        const w = cs - inset * 2;
+        const r = w * 0.24;
+        const lw = Math.max(1, cs * 0.028);
+        for (const [x, y] of f.shape) {
+          const x0 = pad + x * cs + inset;
+          const y0 = pad + y * cs + inset;
+          rrect(g, x0, y0, w, w, r);
+          const body = g.createLinearGradient(x0, y0, x0 + w * 0.4, y0 + w);
+          if (light) {
+            body.addColorStop(0, 'rgba(255,255,255,0.62)');
+            body.addColorStop(1, hsla(h, sat, Math.min(92, l + 12), 0.28));
+          } else {
+            body.addColorStop(0, hsla(h, sat, Math.min(90, l + 28), 0.3));
+            body.addColorStop(1, hsla(h, sat, l, 0.07));
+          }
+          g.fillStyle = body;
+          g.fill();
+          const rim = g.createLinearGradient(x0, y0, x0 + w, y0 + w);
+          rim.addColorStop(0, 'rgba(255,255,255,' + (light ? 0.95 : 0.75) + ')');
+          rim.addColorStop(0.45, 'rgba(255,255,255,0.08)');
+          rim.addColorStop(1, 'rgba(255,255,255,' + (light ? 0.6 : 0.35) + ')');
+          rrect(g, x0 + lw / 2, y0 + lw / 2, w - lw, w - lw, r - lw / 2);
+          g.lineWidth = lw;
+          g.strokeStyle = rim;
+          g.stroke();
+          const sh = g.createLinearGradient(0, y0, 0, y0 + w * 0.5);
+          sh.addColorStop(0, 'rgba(255,255,255,' + (light ? 0.5 : 0.22) + ')');
+          sh.addColorStop(1, 'rgba(255,255,255,0)');
+          rrect(g, x0 + w * 0.1, y0 + w * 0.07, w * 0.8, w * 0.38, r * 0.7);
+          g.fillStyle = sh;
+          g.fill();
+        }
+        return cv;
+      });
     }
 
     set(name) {
@@ -129,6 +189,7 @@
       this.baseHsl = w.base.map(hexToHsl);
       this.blobHsl = w.blobs.map(hexToHsl);
       this.dirty = true;
+      if (this.floaters) this.buildSprites();
     }
 
     resize() {
@@ -137,6 +198,16 @@
       if (w !== this.canvas.width || h !== this.canvas.height) {
         this.canvas.width = w;
         this.canvas.height = h;
+      }
+      if (this.fx) {
+        const k = Math.min(1, 1500 / Math.max(root.innerWidth, root.innerHeight));
+        const fw = Math.max(16, Math.round(root.innerWidth * k));
+        const fh = Math.max(16, Math.round(root.innerHeight * k));
+        if (fw !== this.fx.width || fh !== this.fx.height) {
+          this.fx.width = fw;
+          this.fx.height = fh;
+          this.buildSprites();
+        }
       }
       this.dirty = true;
     }
@@ -208,22 +279,6 @@
         g.fillRect(0, 0, W, H);
       }
 
-      // Drifting tetromino silhouettes; soft because of the CSS upscale.
-      g.globalCompositeOperation = 'source-over';
-      for (const f of this.floaters) {
-        const yy = (((f.y - t * f.vy) % 1.2) + 1.2) % 1.2 - 0.1;
-        const cx = f.x * W;
-        const cy = yy * H;
-        const cs = f.size * M;
-        const c = this.blobHsl[f.c];
-        g.save();
-        g.translate(cx, cy);
-        g.rotate(f.rot + t * f.vr);
-        g.fillStyle = light ? hsla(c[0] + hue, c[1], Math.min(96, c[2] + 18), 0.55) : hsla(c[0] + hue, c[1], Math.min(85, c[2] + 15), 0.2);
-        for (const [x, y] of f.shape) g.fillRect((x - 1.5) * cs, (y - 1) * cs, cs * 0.92, cs * 0.92);
-        g.restore();
-      }
-
       if (this.energy > 0.01) {
         g.globalCompositeOperation = light ? 'source-over' : 'lighter';
         const grad = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, M * 0.7);
@@ -233,7 +288,38 @@
         g.fillRect(0, 0, W, H);
       }
       g.globalCompositeOperation = 'source-over';
+      this.renderFx(t);
     }
+
+    renderFx(t) {
+      const g = this.fxCtx;
+      if (!g || !this.sprites.length) return;
+      const W = this.fx.width;
+      const H = this.fx.height;
+      g.clearRect(0, 0, W, H);
+      this.floaters.forEach((f, i) => {
+        const sp = this.sprites[i];
+        if (!sp) return;
+        const span = 1 + (sp.height * 1.6) / H;
+        const yy = ((((f.y - t * f.vy) % span) + span) % span) - sp.height / H * 0.8;
+        g.save();
+        g.translate(f.x * W, yy * H);
+        g.rotate(f.rot + t * f.vr);
+        g.drawImage(sp, -sp.width / 2, -sp.height / 2);
+        g.restore();
+      });
+    }
+  }
+
+  function rrect(g, x, y, w, h, r) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
   }
 
   root.TetrisWallpaper = { Wallpaper, WALLPAPERS };

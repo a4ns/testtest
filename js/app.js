@@ -19,21 +19,26 @@
   const settings = S.loadSettings();
   if (firstRun) {
     // Lensing re-renders every glass surface as the wallpaper moves; keep it
-    // for desktops and pick plain frosted glass on phones and small devices.
+    // for desktops and start phones on frosted glass (the governor in the
+    // frame loop also steps down if a desktop can't keep up).
     const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
-    const weak = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+    const weak = (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory || 8) <= 2;
     if (coarse || weak) settings.glass = 'standard';
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) settings.reduceMotion = true;
   }
   const records = S.loadRecords();
   const profile = S.loadProfile();
+  let daily = S.loadDaily();
 
   const MODE_INFO = {
     marathon: { name: 'Marathon', tint: '#64d2ff' },
     sprint: { name: 'Sprint 40L', tint: '#ff9f0a' },
     ultra: { name: 'Ultra 2:00', tint: '#bf5af2' },
     zen: { name: 'Zen', tint: '#30d158' },
+    daily: { name: 'Daily', tint: '#ffb340' },
   };
+  // Modes whose runs are saved so they can be continued later.
+  const SAVE_MODES = ['marathon', 'zen'];
 
   const els = {
     root: document.documentElement,
@@ -81,6 +86,8 @@
     },
   };
 
+  const perf = { ema: 16.7, slow: 0, degraded: false };
+
   const app = {
     screen: 'menu',
     modal: null,
@@ -108,13 +115,14 @@
     wakeLock: null,
     hardDropping: false,
     coarse: false,
+    runUnlocks: [],
   };
 
   const board = new R.BoardRenderer(els.boardCanvas);
   const holdView = new R.PreviewRenderer(els.holdCanvas);
   const nextView = new R.PreviewRenderer(els.nextCanvas);
   const logo = new R.LogoRenderer(els.logoCanvas);
-  const wall = new WP.Wallpaper(els.wallpaper);
+  const wall = new WP.Wallpaper(els.wallpaper, $('#wallpaper-fx'));
 
   const input = new window.TetrisInput.Input({
     settings,
@@ -131,6 +139,7 @@
       menuBack: () => back(),
       haptic: (p) => haptic(p),
       afterAction: () => flush(),
+      canCharge: () => app.screen === 'countdown' && !!app.countdown,
     },
   });
 
@@ -151,6 +160,7 @@
     if (app.hud[key] === value) return;
     app.hud[key] = value;
     el.textContent = value;
+    if (el.classList.contains('stat-value')) el.style.setProperty('--chars', Math.max(3, value.length));
   }
   function reduceMotion() {
     return settings.reduceMotion || osReduceMotion();
@@ -188,6 +198,8 @@
     const meta = $('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', WP.WALLPAPERS[name].base[0]);
     wall.animated = settings.animatedBg && !reduceMotion();
+    perf.degraded = false;
+    perf.slow = 0;
     els.root.setAttribute('data-glass', settings.glass);
     els.root.classList.toggle('reduce-motion', reduceMotion());
     Lens.setEnabled(settings.glass === 'high');
@@ -240,32 +252,54 @@
     const dpr = Math.min(3, window.devicePixelRatio || 1);
     app.coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
     const showPad = app.coarse && settings.touch === 'buttons';
-    const tall = vw < 560 || (vw < 900 && vh > vw * 1.15);
+    // Three arrangements: wide (desktop/tablet), tall (portrait phone) and
+    // short (landscape phone: HUD and buttons flank a full-height board).
+    const short = vh < 560 && vw > vh * 1.2;
+    const tall = !short && (vw < 560 || (vw < 900 && vh > vw * 1.15));
+    const mode = short ? 'short' : tall ? 'tall' : 'wide';
     const ins = insets();
     const padX = Math.max(12, ins.left) + Math.max(12, ins.right);
     const padY = Math.max(10, ins.top) + Math.max(10, ins.bottom);
-    // Six touch buttons across two clusters must fit the narrowest phones.
-    const padSize = Math.round(clamp((vw - padX - 12 - 4 * 10) / 6, 44, 72));
+    const availW = vw - padX;
+    const availH = vh - padY;
+    const padGap = availW < 340 ? 6 : 10;
+    let padSize;
     let cell;
-    if (tall) {
+    let shortSide = 0;
+    if (mode === 'short') {
+      padSize = Math.round(clamp(availH / 6.8, 44, 64));
+      const gap = 12;
+      const cluster = showPad ? 3 * padSize + 2 * padGap : 0;
+      const byH = availH / (20.7 + 0.8);
+      const bySide = (availW - 2 * Math.max(116, cluster) - 2 * gap) / 10.7;
+      const byPanels = (availW - 2 * 28 - 2 * gap) / (10.7 + 2 * 0.6 * 4.4);
+      cell = Math.floor(Math.min(byH, bySide, byPanels));
+      cell = clamp(cell, 10, 44);
+      shortSide = Math.floor((availW - (cell * 10.7) - 2 * gap) / 2);
+    } else if (mode === 'tall') {
+      // Six touch buttons across two clusters must fit the narrowest phones.
+      padSize = Math.floor(clamp((availW - 12 - 4 * padGap) / 6, 38, 72));
       const padH = showPad ? Math.round(padSize * 1.8 + 30) : 0;
       const fixed = 44 + 3 * 8 + 18 + padH;
-      const byH = (vh - padY - fixed) / (1.3 + 0.6 + 20.7);
-      const byW = (vw - padX) / 10.7;
+      const byH = (availH - fixed) / (1.3 + 0.6 + 20.7);
+      const byW = availW / 10.7;
       cell = Math.floor(Math.min(byH, byW));
     } else {
+      padSize = Math.floor(clamp((availW - 12 - 4 * padGap) / 6, 38, 72));
       const padH = showPad ? Math.round(padSize * 1.8 + 30) : 0;
       const fixed = 44 + 2 * 10 + 12 + padH;
-      const byH = (vh - padY - fixed) / (1.3 + 20.7);
-      const byW = (vw - padX - 2 * 28 - 4 * 18) / (10.7 + 2 * 3.2);
+      const byH = (availH - fixed) / (1.3 + 20.7);
+      const byW = (availW - 2 * 28 - 4 * 18) / (10.7 + 2 * 3.2);
       cell = Math.floor(Math.min(byH, byW));
     }
     cell = clamp(cell, 10, 44);
-    const mini = Math.max(8, Math.round(cell * (tall ? 0.5 : 0.72)));
+    const mini = Math.max(8, Math.round(cell * (mode === 'tall' ? 0.5 : mode === 'short' ? 0.6 : 0.72)));
     const bpad = Math.max(5, Math.round(cell * 0.35));
+    const side = Math.round(mini * 4.4 + 28);
     app.cell = cell;
     app.mini = mini;
-    app.tall = tall;
+    app.tall = mode === 'tall';
+    app.layout = mode;
     app.dpr = dpr;
 
     const st = els.game.style;
@@ -273,36 +307,54 @@
     st.setProperty('--mini', mini + 'px');
     st.setProperty('--bpad', bpad + 'px');
     st.setProperty('--board-w', cell * 10 + bpad * 2 + 'px');
-    st.setProperty('--side', Math.round(mini * 4.4 + 28) + 'px');
+    st.setProperty('--side', side + 'px');
     st.setProperty('--gap', Math.round(clamp(cell * 0.7, 10, 26)) + 'px');
     st.setProperty('--pad-size', padSize + 'px');
-    els.game.classList.toggle('tall', tall);
+    st.setProperty('--pad-gap', padGap + 'px');
+    els.game.classList.toggle('tall', mode === 'tall');
+    els.game.classList.toggle('short', mode === 'short');
+    els.game.classList.toggle('narrow', mode === 'tall' && vw < 400);
     els.game.classList.toggle('show-pad', showPad);
-    els.game.classList.toggle('compact', cell < 18);
-    els.goal.hidden = cell < 18;
+    els.game.classList.toggle('compact', mode === 'wide' && cell < 18);
+    els.goal.hidden = mode !== 'wide' || cell < 18;
+
+    // Width available to each stat value, so long numbers shrink to fit.
+    let fitW;
+    if (mode === 'tall') {
+      const n = vw < 400 ? 3 : 4;
+      const strip = availW - 2 * 44 - 2 * 8 - 24;
+      fitW = Math.floor((strip - (n - 1) * 6) / n);
+    } else if (mode === 'short') {
+      const panelW = Math.min(shortSide, 156);
+      st.setProperty('--short-stats-w', panelW + 'px');
+      fitW = panelW - 24;
+    } else {
+      fitW = side - 32;
+    }
+    st.setProperty('--fit-w', Math.max(40, fitW) + 'px');
 
     const light = els.root.getAttribute('data-scheme') === 'light';
     board.resize(cell, dpr, light);
 
     app.holdCell = mini;
     app.nextCell = mini;
-    if (tall) {
+    if (mode === 'tall') {
       holdView.resize(Math.round(mini * 4.2), Math.round(mini * 2.6), dpr);
       const holdPanel = Math.round(mini * 4.2) + 38;
-      const nextW = Math.max(mini * 4.2, vw - padX - holdPanel - 8 - 38);
+      const nextW = Math.max(mini * 4.2, availW - holdPanel - 8 - 38);
       app.nextCount = clamp(Math.floor(nextW / (mini * 3.9)), 1, settings.previews);
       nextView.resize(Math.round(nextW), Math.round(mini * 2.6), dpr);
     } else {
-      app.nextCount = settings.previews;
+      app.nextCount = mode === 'short' ? Math.min(settings.previews, 3) : settings.previews;
       holdView.resize(Math.round(mini * 4.4), Math.round(mini * 2.8), dpr);
-      nextView.resize(Math.round(mini * 4.4), Math.round(mini * (3.3 + 2.7 * (settings.previews - 1))), dpr);
+      nextView.resize(Math.round(mini * 4.4), Math.round(mini * (3.3 + 2.7 * (app.nextCount - 1))), dpr);
     }
 
     const logoCell = clamp(Math.floor(Math.min(vw - 48, 560) / 24), 8, 22);
     logo.resize(logoCell, dpr);
     wall.resize();
     app.hud = {};
-    $$('.segmented').forEach((s) => positionLens(s));
+    $$('.segmented').forEach((s) => positionLens(s, false, true));
     Lens.refresh();
   }
 
@@ -324,15 +376,87 @@
     els.game.inert = blocking || !(app.screen === 'playing' || app.screen === 'countdown');
   }
 
+  // Liquid Glass surfaces grow out of the control that summoned them and
+  // melt back into it when dismissed.
+  const morphTokens = new WeakMap();
+  function morphTransform(from, to) {
+    const sx = Math.max(0.04, from.width / to.width);
+    const sy = Math.max(0.04, from.height / to.height);
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    return 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px) scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ')';
+  }
+  function canMorph(sheet, origin) {
+    return !!(sheet && origin && !reduceMotion() && origin.getClientRects().length && origin.getBoundingClientRect().width);
+  }
+  function morphOpen(screen, origin) {
+    const sheet = screen.firstElementChild;
+    if (!canMorph(sheet, origin)) return;
+    const token = {};
+    morphTokens.set(sheet, token);
+    sheet.style.transition = 'none';
+    sheet.style.transform = 'none';
+    const to = sheet.getBoundingClientRect();
+    const from = origin.getBoundingClientRect();
+    if (!to.width || !to.height) {
+      sheet.style.transition = '';
+      sheet.style.transform = '';
+      return;
+    }
+    sheet.style.transform = morphTransform(from, to);
+    sheet.style.opacity = '0.3';
+    void sheet.offsetWidth;
+    sheet.style.transition = 'transform 0.62s cubic-bezier(0.22, 1.22, 0.36, 1), opacity 0.22s ease-out';
+    sheet.style.transform = '';
+    sheet.style.opacity = '';
+    setTimeout(() => {
+      if (morphTokens.get(sheet) === token) sheet.style.transition = '';
+    }, 700);
+  }
+  function morphClose(screen, origin) {
+    const sheet = screen.firstElementChild;
+    if (!canMorph(sheet, origin)) return;
+    const token = {};
+    morphTokens.set(sheet, token);
+    const current = sheet.style.transform;
+    sheet.style.transition = 'none';
+    sheet.style.transform = 'none';
+    const to = sheet.getBoundingClientRect();
+    const from = origin.getBoundingClientRect();
+    sheet.style.transform = current;
+    void sheet.offsetWidth;
+    sheet.style.transition = 'transform 0.34s cubic-bezier(0.45, 0, 0.75, 1), opacity 0.28s ease-in';
+    sheet.style.transform = morphTransform(from, to);
+    sheet.style.opacity = '0';
+    setTimeout(() => {
+      if (morphTokens.get(sheet) !== token) return;
+      sheet.style.transition = 'none';
+      sheet.style.transform = '';
+      sheet.style.opacity = '';
+      void sheet.offsetWidth;
+      sheet.style.transition = '';
+    }, 400);
+  }
+
   function setScreen(name) {
+    const prev = app.screen;
     app.screen = name;
     els.screens.menu.classList.toggle('is-open', name === 'menu');
     els.screens.paused.classList.toggle('is-open', name === 'paused');
     els.screens.results.classList.toggle('is-open', name === 'results');
     els.game.classList.toggle('is-hidden', name === 'menu');
+    els.boardShell.classList.toggle('is-veiled', name === 'paused');
     Audio.duck(name === 'paused');
     updateInert();
-    if (name === 'paused' || name === 'results' || name === 'menu') flushToasts();
+    if (toastsBlocked()) dismissToast();
+    else setTimeout(pumpToasts, 300);
+    if (name === 'results') {
+      // The results card lists this run's unlocks; don't repeat them as toasts.
+      for (let i = toastQueue.length - 1; i >= 0; i--) if (app.runUnlocks.indexOf(toastQueue[i].id) !== -1) toastQueue.splice(i, 1);
+    }
+    if (name === 'paused' && prev !== 'paused') morphOpen(els.screens.paused, els.btnPause);
+    else if (prev === 'paused' && name !== 'paused') morphClose(els.screens.paused, els.btnPause);
+    if (name === 'results' && prev !== 'results') morphOpen(els.screens.results, els.boardShell);
     if (name === 'paused') focusLater($('#btn-resume'));
     else if (name === 'results') focusLater($('#btn-res-again'));
     Lens.refresh();
@@ -349,11 +473,12 @@
     });
   }
 
-  function openModal(id, onClose) {
+  function openModal(id, onClose, origin) {
     const el = els.modals[id];
     if (!el) return;
     if (app.modal) closeModal(true);
     app.modalReturn = document.activeElement;
+    app.modalOrigin = origin || null;
     app.modalOnClose = onClose || null;
     app.modal = id;
     if (id === 'settings') syncSettingsUI();
@@ -362,6 +487,8 @@
     el.classList.add('is-open');
     el.scrollTop = 0;
     updateInert();
+    dismissToast();
+    morphOpen(el, app.modalOrigin);
     requestAnimationFrame(() => {
       $$('.segmented', el).forEach((s) => positionLens(s));
       Lens.refresh();
@@ -375,10 +502,13 @@
     cancelCapture();
     const el = els.modals[app.modal];
     el.classList.remove('is-open');
+    morphClose(el, app.modalOrigin);
+    app.modalOrigin = null;
     app.modal = null;
     updateInert();
     const cb = app.modalOnClose;
     app.modalOnClose = null;
+    setTimeout(pumpToasts, 400);
     if (!silent) Audio.play('back');
     if (app.modalReturn && document.contains(app.modalReturn)) focusLater(app.modalReturn);
     app.modalReturn = null;
@@ -400,17 +530,114 @@
 
   // ----------------------------------------------------------------- menu
 
+  const num = (v) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
+
+  function prettyDay(key) {
+    try {
+      const [y, m, d] = key.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch (e) {
+      return key;
+    }
+  }
+
   function refreshMenu() {
     for (const m of S.MODE_ORDER) {
+      if (m === 'daily') continue;
       const best = S.bestRun(records, m);
       const el = $('[data-best="' + m + '"]');
       if (el) el.textContent = best ? (m === 'sprint' ? fmtTime(best.time, true) : fmtInt(best.score)) : '—';
+    }
+    // Daily card: today's date, today's best and the live streak.
+    const today = S.dayKey();
+    daily = S.loadDaily();
+    $('#daily-date').textContent = prettyDay(today);
+    const todayBest = daily.days[today];
+    $('[data-best="daily"]').textContent = todayBest != null ? fmtInt(todayBest) : 'Not played yet';
+    const streak = S.liveStreak(daily, today);
+    const label = $('#daily-streak');
+    label.textContent = '';
+    if (streak > 0) {
+      const sEl = document.createElement('span');
+      sEl.className = 'streak';
+      sEl.innerHTML = '<svg aria-hidden="true"><use href="#i-flame"/></svg>';
+      sEl.appendChild(document.createTextNode(streak + '-day streak'));
+      label.appendChild(sEl);
+    } else {
+      label.textContent = 'Today’s best';
+    }
+
+    // Continue banner for the most recent saved run.
+    const saves = SAVE_MODES.map((m) => ({ m, d: S.loadSave(m) })).filter((x) => x.d && x.d.game && x.d.game.state === 'playing');
+    saves.sort((a, b) => num(b.d.savedAt) - num(a.d.savedAt));
+    const banner = $('#continue');
+    if (saves.length) {
+      const { m, d } = saves[0];
+      app.continueMode = m;
+      $('#continue-title').textContent = 'Continue ' + MODE_INFO[m].name;
+      $('#continue-detail').textContent = 'Level ' + num(d.game.level) + ' · ' + fmtInt(num(d.game.score)) + ' points · ' + fmtTime(num(d.game.time));
+      banner.hidden = false;
+    } else {
+      app.continueMode = null;
+      banner.hidden = true;
     }
     const hint = $('#menu-hint');
     if (hint) hint.hidden = app.coarse;
   }
 
+  // ------------------------------------------------------ saves & lifetime
+
+  let lastSaveAt = 0;
+  function saveRun(force) {
+    const g = app.game;
+    if (!g || g.state !== 'playing' || SAVE_MODES.indexOf(g.mode) === -1) return;
+    const now = performance.now();
+    if (!force && now - lastSaveAt < 2000) return;
+    lastSaveAt = now;
+    S.writeSave(g.mode, { game: g.serialize(), savedAt: Date.now(), unlocks: app.runUnlocks.slice() });
+  }
+
+  function gameTotals(g) {
+    const st = g.stats;
+    return { lines: g.lines, time: g.time, pieces: st.pieces, tetrises: st.tetrises, tspins: st.tspins + st.tspinMinis, pcs: st.perfectClears, score: g.score };
+  }
+
+  function addLifetime(t) {
+    if (!t || (!t.pieces && !t.time)) return;
+    profile.games += 1;
+    profile.lines += num(t.lines);
+    profile.pieces += num(t.pieces);
+    profile.tetrises += num(t.tetrises);
+    profile.tspins += num(t.tspins);
+    profile.perfectClears += num(t.pcs);
+    profile.timePlayed += Math.round(num(t.time));
+    profile.bestScore = Math.max(profile.bestScore, num(t.score));
+    S.saveProfile(profile);
+  }
+
+  /** A run left unfinished still counts toward lifetime stats. */
+  function abandonCurrent() {
+    const g = app.game;
+    if (!g || g.state !== 'playing') return;
+    if (SAVE_MODES.indexOf(g.mode) !== -1) S.clearSave(g.mode);
+    addLifetime(gameTotals(g));
+  }
+
+  function discardSave(mode) {
+    const d = S.loadSave(mode);
+    if (!d) return;
+    const gd = d.game || {};
+    const st = gd.stats || {};
+    addLifetime({ lines: gd.lines, time: gd.time, pieces: st.pieces, tetrises: st.tetrises, tspins: num(st.tspins) + num(st.tspinMinis), pcs: st.perfectClears, score: gd.score });
+    S.clearSave(mode);
+  }
+
   function quitToMenu() {
+    const g = app.game;
+    if (g && g.state === 'playing') {
+      if (SAVE_MODES.indexOf(g.mode) !== -1) saveRun(true);
+      else addLifetime(gameTotals(g));
+    }
     app.game = null;
     app.countdown = null;
     els.countdown.textContent = '';
@@ -435,39 +662,56 @@
     return settings.sdf >= S.SDF_INFINITE ? Infinity : settings.sdf;
   }
 
-  function startGame(mode) {
+  /** Shared setup for new, restarted and continued games. */
+  function beginGame(g, extra) {
     if (app.modal) closeModal(true);
-    app.mode = E.MODES[mode] ? mode : 'marathon';
-    app.game = new E.Game({
-      mode: app.mode,
-      startLevel: settings.startLevel,
-      previewCount: settings.previews,
-      softDropFactor: softDropFactor(),
-    });
-    app.displayScore = 0;
+    app.mode = g.mode;
+    app.game = g;
+    app.displayScore = g.score;
     app.hud = {};
     app.endInfo = null;
     app.hardDropping = false;
+    app.runUnlocks = (extra && extra.unlocks) || [];
+    app.splits = [];
+    app.dailyKey = (extra && extra.dailyKey) || null;
     board.reset();
     els.callouts.textContent = '';
     input.releaseAll();
     configureHud();
-    Audio.setLevel(app.game.level);
-    wall.setLevel(app.game.level);
+    Audio.setLevel(g.level);
+    wall.setLevel(g.level);
     wall.setDanger(0);
     Audio.duck(false);
     Audio.startMusic();
     requestWakeLock();
-    $('#pause-mode').textContent = MODE_INFO[app.mode].name;
-    $('#btn-quit').lastChild.textContent = app.mode === 'zen' ? 'End session' : 'Main menu';
+    $('#pause-mode').textContent = MODE_INFO[g.mode].name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
+    $('#btn-quit').lastChild.textContent = g.mode === 'zen' ? 'End session' : g.mode === 'marathon' ? 'Save & quit' : 'Main menu';
+  }
+
+  /** quick: a one-beat READY instead of 3-2-1 (instant retries). */
+  function startGame(mode, quick) {
+    mode = E.MODES[mode] ? mode : 'marathon';
+    abandonCurrent();
+    if (SAVE_MODES.indexOf(mode) !== -1) discardSave(mode);
+    const opts = { mode, startLevel: settings.startLevel, previewCount: settings.previews, softDropFactor: softDropFactor() };
+    let dailyKey = null;
+    if (mode === 'daily') {
+      dailyKey = S.dayKey();
+      opts.seed = E.hashSeed('daily:' + dailyKey);
+    }
+    beginGame(new E.Game(opts), { dailyKey });
 
     const go = () =>
-      startCountdown(460, () => {
-        if (!app.game) return;
-        app.game.start();
-        setScreen('playing');
-        flush();
-      });
+      startCountdown(
+        quick ? 520 : 400,
+        () => {
+          if (!app.game) return;
+          app.game.start();
+          setScreen('playing');
+          flush();
+        },
+        quick ? 1 : 3
+      );
     if (app.coarse && settings.touch === 'gestures' && !profile.seenTouchHelp) {
       setScreen('countdown');
       app.countdown = null;
@@ -481,24 +725,39 @@
     }
   }
 
+  function continueRun(mode) {
+    const data = mode && S.loadSave(mode);
+    const g = data && E.Game.restore(data.game, { previewCount: settings.previews, softDropFactor: softDropFactor() });
+    if (!g) {
+      if (mode) S.clearSave(mode);
+      refreshMenu();
+      return;
+    }
+    const unlocks = Array.isArray(data.unlocks) ? data.unlocks.filter((id) => typeof id === 'string') : [];
+    beginGame(g, { unlocks });
+    startCountdown(400, () => {
+      if (app.game === g) setScreen('playing');
+    });
+  }
+
   function restart() {
-    startGame(app.mode);
+    startGame(app.mode, true);
   }
 
   let countdownToken = 0;
-  function startCountdown(stepMs, then) {
-    app.countdown = { start: performance.now(), stepMs, n: 99, then };
+  function startCountdown(stepMs, then, steps) {
+    app.countdown = { start: performance.now(), stepMs, steps: steps || 3, n: 99, then };
     countdownToken++;
     setScreen('countdown');
   }
 
   function updateCountdown(now) {
     const c = app.countdown;
-    const n = 3 - Math.floor((now - c.start) / c.stepMs);
+    const n = c.steps - Math.floor((now - c.start) / c.stepMs);
     if (n === c.n) return;
     c.n = n;
     if (n >= 1) {
-      els.countdown.innerHTML = '<span>' + n + '</span>';
+      els.countdown.innerHTML = c.steps === 1 ? '<span class="ready">READY</span>' : '<span>' + n + '</span>';
       Audio.play('countdown', n);
     } else {
       els.countdown.innerHTML = '<span class="go">GO</span>';
@@ -515,6 +774,7 @@
   function pause() {
     if (app.screen !== 'playing' && app.screen !== 'countdown') return;
     if (app.modal) return;
+    saveRun(true);
     input.releaseAll();
     app.countdown = null;
     countdownToken++;
@@ -529,7 +789,7 @@
     Audio.play('select');
     requestWakeLock();
     if (app.game.state === 'ready') {
-      startCountdown(460, () => {
+      startCountdown(400, () => {
         if (!app.game) return;
         app.game.start();
         setScreen('playing');
@@ -559,12 +819,12 @@
       Audio.play('win');
       callout(ev.result === 'timeup' ? 'TIME!' : 'FINISH', null, 'pc');
       wall.pulse(1.2);
-      app.endAt = now + 1600;
+      app.endAt = now + 1200;
     } else {
       board.startGameOver(now);
       Audio.play('gameOver');
       haptic([30, 60, 40]);
-      app.endAt = now + 1500;
+      app.endAt = now + 1150;
     }
     app.endInfo = finalizeRun(g, ev);
   }
@@ -580,18 +840,14 @@
       date: Date.now(),
     };
     const prevBest = S.bestRun(records, g.mode);
+    if (g.mode === 'sprint' && ev.result === 'cleared') run.splits = app.splits.slice(0, 3).concat([run.time]);
+    if (g.mode === 'daily') run.day = app.dailyKey || S.dayKey();
     const eligible = g.mode === 'sprint' ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
     const rank = eligible ? S.addRecord(records, g.mode, run) : 0;
+    if (SAVE_MODES.indexOf(g.mode) !== -1) S.clearSave(g.mode);
+    if (g.mode === 'daily' && ev.result !== 'ended') daily = S.recordDaily(S.loadDaily(), run.day, g.score);
 
-    profile.games += 1;
-    profile.lines += g.lines;
-    profile.pieces += st.pieces;
-    profile.tetrises += st.tetrises;
-    profile.tspins += st.tspins + st.tspinMinis;
-    profile.perfectClears += st.perfectClears;
-    profile.timePlayed += Math.round(g.time);
-    profile.bestScore = Math.max(profile.bestScore, g.score);
-    S.saveProfile(profile);
+    addLifetime(gameTotals(g));
     checkAchievements(true, ev);
     return { run, rank, prevBest, result: ev.result, eligible };
   }
@@ -605,7 +861,7 @@
     }
     const mode = g.mode;
     const st = g.stats;
-    $('#res-mode').textContent = MODE_INFO[mode].name;
+    $('#res-mode').textContent = MODE_INFO[mode].name + (mode === 'daily' && info.run.day ? ' · ' + prettyDay(info.run.day) : '');
     let title = 'Game Over';
     if (info.result === 'cleared') title = 'Sprint complete';
     else if (info.result === 'timeup') title = 'Time’s up';
@@ -635,15 +891,27 @@
       const b = document.createElement('span');
       b.className = 'badge';
       b.innerHTML = '<svg width="14" height="14" aria-hidden="true"><use href="#i-star"/></svg>';
-      b.appendChild(document.createTextNode(info.prevBest ? 'New personal best' : 'First record set'));
+      let text = info.prevBest ? 'New personal best' : 'First record set';
+      if (mode === 'sprint' && info.prevBest) text += ' · −' + ((info.prevBest.time - info.run.time) / 1000).toFixed(2) + 's';
+      b.appendChild(document.createTextNode(text));
       slot.appendChild(b);
     } else if (info.rank > 1) {
       const b = document.createElement('span');
       b.className = 'eyebrow';
       b.style.display = 'block';
       b.style.marginTop = '8px';
-      b.textContent = 'Rank #' + info.rank + ' in your top 10';
+      let text = 'Rank #' + info.rank + ' in your top 10';
+      if (mode === 'sprint' && info.prevBest) text += ' · +' + ((info.run.time - info.prevBest.time) / 1000).toFixed(2) + 's vs best';
+      b.textContent = text;
       slot.appendChild(b);
+    }
+    if (mode === 'daily' && info.result !== 'ended') {
+      const sEl = document.createElement('span');
+      sEl.className = 'eyebrow';
+      sEl.style.display = 'block';
+      sEl.style.marginTop = '8px';
+      sEl.textContent = daily.streak > 1 ? daily.streak + '-day streak · come back tomorrow' : 'New pieces tomorrow';
+      slot.appendChild(sEl);
     }
 
     const secs = g.time / 1000;
@@ -667,6 +935,20 @@
       d.append(dt, dd);
       dl.appendChild(d);
     }
+    const unlocks = $('#res-unlocks');
+    unlocks.textContent = '';
+    for (const id of app.runUnlocks) {
+      const a = S.ACHIEVEMENTS.find((x) => x.id === id);
+      if (!a) continue;
+      const chip = document.createElement('span');
+      chip.className = 'unlock-chip';
+      chip.innerHTML = '<svg aria-hidden="true"><use href="#i-star"/></svg>';
+      chip.appendChild(document.createTextNode(a.name));
+      chip.title = a.desc;
+      unlocks.appendChild(chip);
+    }
+    unlocks.hidden = !app.runUnlocks.length;
+    if (app.runUnlocks.length) setTimeout(() => Audio.play('achievement'), 450);
     renderBoardList($('#res-board'), mode, info.eligible ? info.run : null, 5);
     setScreen('results');
     app.resultsShownAt = performance.now();
@@ -703,6 +985,7 @@
           haptic(8);
           break;
         case 'lock':
+          saveRun(false);
           board.onLock(ev, now);
           if (!app.hardDropping) Audio.play('lock');
           app.hardDropping = false;
@@ -742,7 +1025,28 @@
     if (special) bump(1.5, true);
     if (ev.lines) haptic(special ? [16, 40, 22] : 12);
     clearCallout(ev);
+    sprintSplits();
     checkAchievements(false);
+  }
+
+  /** Sprint pace: at 10, 20 and 30 lines compare against the best run. */
+  function sprintSplits() {
+    const g = app.game;
+    if (!g || g.mode !== 'sprint') return;
+    while (app.splits.length < 3 && g.lines >= (app.splits.length + 1) * 10) {
+      const idx = app.splits.length;
+      const t = Math.round(g.time);
+      app.splits.push(t);
+      const pb = S.bestRun(records, 'sprint');
+      const ref = pb && Array.isArray(pb.splits) ? pb.splits[idx] : null;
+      const title = (idx + 1) * 10 + ' LINES';
+      if (typeof ref === 'number' && isFinite(ref)) {
+        const d = t - ref;
+        callout(title, (d <= 0 ? '−' : '+') + (Math.abs(d) / 1000).toFixed(2) + 's vs best', 'split ' + (d <= 0 ? 'ahead' : 'behind'));
+      } else {
+        callout(title, fmtTime(t, true), 'split');
+      }
+    }
   }
 
   function clearCallout(ev) {
@@ -784,6 +1088,7 @@
       const m = document.createElement('div');
       m.className = 'callout-main';
       m.textContent = main;
+      m.style.setProperty('--chars', Math.max(6, main.length));
       el.appendChild(m);
     }
     if (sub) {
@@ -865,6 +1170,11 @@
         if (g.time < 60000) u('sprint60');
       }
       if (profile.lines >= 1000) u('lines1000');
+      if (g.mode === 'daily' && ev && ev.result !== 'ended') {
+        u('daily');
+        if (daily.streak >= 3) u('streak3');
+        if (daily.streak >= 7) u('streak7');
+      }
     }
     if (got.length) {
       S.saveProfile(profile);
@@ -872,43 +1182,56 @@
     }
   }
 
-  // Achievements earned mid-game wait for a pause or the results screen so
-  // nothing ever covers the playfield.
+  // Toasts appear one at a time and only when nothing important is on screen:
+  // never over play, a modal or the results card (which lists the run's
+  // unlocks itself).
   const toastQueue = [];
+  let toastEl = null;
+
   function toastAchievement(id) {
     const a = S.ACHIEVEMENTS.find((x) => x.id === id);
     if (!a) return;
-    if (app.screen === 'playing' || app.screen === 'countdown' || app.screen === 'ending') {
-      if (toastQueue.indexOf(id) === -1) toastQueue.push(id);
-      return;
-    }
-    toast('Achievement · ' + a.name, a.desc, 'i-star');
-    Audio.play('achievement');
-  }
-  function flushToasts() {
-    const ids = toastQueue.splice(0);
-    ids.forEach((id, i) => setTimeout(() => toastAchievement(id), 350 + i * 900));
+    if (app.runUnlocks.indexOf(id) === -1) app.runUnlocks.push(id);
+    toastQueue.push({ id, title: 'Achievement · ' + a.name, body: a.desc, icon: 'i-star', sound: 'achievement' });
+    pumpToasts();
   }
 
-  function toast(title, body, icon) {
+  function toastsBlocked() {
+    return !!app.modal || app.screen === 'playing' || app.screen === 'countdown' || app.screen === 'ending' || app.screen === 'results';
+  }
+
+  function pumpToasts() {
+    if (toastEl || !toastQueue.length || toastsBlocked()) return;
+    const item = toastQueue.shift();
     const t = document.createElement('div');
     t.className = 'toast glass no-lens';
     t.setAttribute('role', 'status');
-    t.innerHTML = '<i><svg aria-hidden="true"><use href="#' + icon + '"/></svg></i><span><b></b><small></small></span>';
-    $('b', t).textContent = title;
-    $('small', t).textContent = body;
+    t.innerHTML = '<i><svg aria-hidden="true"><use href="#' + item.icon + '"/></svg></i><span><b></b><small></small></span>';
+    $('b', t).textContent = item.title;
+    $('small', t).textContent = item.body;
     els.toasts.appendChild(t);
+    toastEl = t;
+    if (item.sound) Audio.play(item.sound);
+    t._timer = setTimeout(() => dismissToast(t), 3200);
+  }
+
+  function dismissToast(t) {
+    t = t || toastEl;
+    if (!t) return;
+    clearTimeout(t._timer);
+    t.classList.add('is-leaving');
     setTimeout(() => {
-      t.classList.add('is-leaving');
-      setTimeout(() => t.remove(), 420);
-    }, 3400);
+      t.remove();
+      if (toastEl === t) toastEl = null;
+      setTimeout(pumpToasts, 200);
+    }, 360);
   }
 
   // ------------------------------------------------------------------ HUD
 
   function configureHud() {
     const info = MODE_INFO[app.mode];
-    els.modeName.textContent = info.name;
+    els.modeName.textContent = info.name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
     els.modePill.style.setProperty('--tint', info.tint);
     els.goal.style.setProperty('--tint', info.tint);
     const L = {
@@ -916,6 +1239,7 @@
       sprint: ['Time', 'Lines', 'Pieces', 'PPS'],
       ultra: ['Score', 'Time', 'Lines', 'Level'],
       zen: ['Score', 'Level', 'Lines', 'Time'],
+      daily: ['Score', 'Time', 'Lines', 'Level'],
     }[app.mode];
     els.st.mainL.textContent = L[0];
     els.st.aL.textContent = L[1];
@@ -950,7 +1274,8 @@
         ringLabel = 'Lines left';
         break;
       }
-      case 'ultra': {
+      case 'ultra':
+      case 'daily': {
         const rem = g.remainingTime();
         main = fmtInt(app.displayScore);
         a = fmtTime(Math.ceil(rem / 1000) * 1000);
@@ -999,6 +1324,25 @@
 
   // ---------------------------------------------------------- frame loop
 
+  /** If the glass can't hold ~40 fps during play, quietly step the material
+   * down (Liquid → Frosted → Solid) for this session. */
+  function governFrameRate(dt) {
+    const material = els.root.getAttribute('data-glass');
+    if (material === 'low') return;
+    perf.ema = perf.ema * 0.95 + dt * 0.05;
+    perf.slow = perf.ema > 25 ? perf.slow + 1 : Math.max(0, perf.slow - 2);
+    if (perf.slow <= 240) return;
+    perf.slow = 0;
+    perf.ema = 16.7;
+    perf.degraded = true;
+    if (material === 'high') {
+      Lens.setEnabled(false);
+      els.root.setAttribute('data-glass', 'standard');
+    } else {
+      els.root.setAttribute('data-glass', 'low');
+    }
+  }
+
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = app.last ? now - app.last : 16.7;
@@ -1007,7 +1351,10 @@
 
     input.update(dt);
     if (app.screen === 'countdown' && app.countdown) updateCountdown(now);
-    if (app.screen === 'playing' && app.game) app.game.update(dt, input.softHeld);
+    if (app.screen === 'playing' && app.game) {
+      app.game.update(dt, input.softHeld);
+      governFrameRate(dt);
+    }
     processEvents(now);
     if (app.screen === 'ending' && now >= app.endAt) showResults();
 
@@ -1113,12 +1460,22 @@
     }
   }
 
-  function positionLens(seg, animate) {
+  /** Moves the glass "lens" under the selected segment. The first placement
+   * (and layout changes) jump straight there instead of sliding from 0. */
+  function positionLens(seg, animate, instant) {
     const lens = $('.seg-lens', seg);
     const active = $('[aria-selected="true"], [aria-pressed="true"]', seg);
     if (!lens || !active || !active.offsetWidth) return;
+    const jump = instant || !lens.dataset.placed;
+    if (jump) lens.style.transition = 'none';
     lens.style.width = active.offsetWidth + 'px';
     lens.style.transform = 'translateX(' + active.offsetLeft + 'px)';
+    lens.dataset.placed = '1';
+    if (jump) {
+      void lens.offsetWidth;
+      lens.style.transition = '';
+      return;
+    }
     if (animate && !reduceMotion()) {
       lens.classList.remove('squish');
       void lens.offsetWidth;
@@ -1131,6 +1488,7 @@
     $$('[role="tab"]', list).forEach((b) => {
       const on = b === tab;
       b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
       const panel = document.getElementById(b.getAttribute('aria-controls'));
       if (panel) panel.hidden = !on;
     });
@@ -1581,6 +1939,12 @@
         else if (k === 'Tab') e.preventDefault();
         return;
       case 'ending':
+        // The run is already saved; R skips straight to the next attempt.
+        if (k === 'KeyR' && !e.repeat) {
+          e.preventDefault();
+          restart();
+          return;
+        }
         if (input.keyMap[k]) e.preventDefault();
         return;
       case 'paused':
@@ -1597,10 +1961,6 @@
         navKeys(e);
         return;
       case 'results':
-        if (performance.now() - app.resultsShownAt < 700) {
-          e.preventDefault();
-          return;
-        }
         if (k === 'KeyR' && !e.repeat) {
           e.preventDefault();
           restart();
@@ -1609,6 +1969,11 @@
         if (k === 'Escape') {
           e.preventDefault();
           quitToMenu();
+          return;
+        }
+        // Swallow keys still being mashed from the last game for a moment.
+        if (performance.now() - app.resultsShownAt < 600) {
+          e.preventDefault();
           return;
         }
         navKeys(e);
@@ -1696,6 +2061,27 @@
     );
   }
 
+  /** On Android, tilting the phone moves the specular light across the glass. */
+  function setupTilt() {
+    const DOE = window.DeviceOrientationEvent;
+    if (!app.coarse || !DOE || typeof DOE.requestPermission === 'function') return;
+    let pending = false;
+    let gx = 0;
+    let gy = 0;
+    window.addEventListener('deviceorientation', (e) => {
+      if (e.beta == null || e.gamma == null || reduceMotion()) return;
+      gx = clamp(e.gamma / 40, -1, 1);
+      gy = clamp((e.beta - 45) / 40, -1, 1);
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        els.root.style.setProperty('--lx', Math.round((0.5 + gx * 0.6) * window.innerWidth) + 'px');
+        els.root.style.setProperty('--ly', Math.round((0.15 + gy * 0.5) * window.innerHeight) + 'px');
+      });
+    });
+  }
+
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator) || !$('link[rel="manifest"]')) return;
     if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
@@ -1722,7 +2108,7 @@
         app.mode = card.dataset.mode;
       });
     });
-    $$('[data-open]').forEach((b) => b.addEventListener('click', () => openModal(b.dataset.open)));
+    $$('[data-open]').forEach((b) => b.addEventListener('click', () => openModal(b.dataset.open, null, b)));
     $$('[data-close]').forEach((b) => b.addEventListener('click', () => closeModal()));
     $$('.screen.modal').forEach((m) =>
       m.addEventListener('pointerdown', (e) => {
@@ -1742,6 +2128,18 @@
       }
     });
     $('#btn-res-again').addEventListener('click', () => restart());
+    $('#btn-continue').addEventListener('click', () => {
+      unlockAudio();
+      Audio.play('select');
+      continueRun(app.continueMode);
+    });
+    $('#btn-discard').addEventListener('click', () => {
+      if (app.continueMode) discardSave(app.continueMode);
+      Audio.play('back');
+      refreshMenu();
+      focusLater($('.mode-card[data-mode="' + app.mode + '"]'));
+    });
+    window.addEventListener('pagehide', () => saveRun(true));
     $('#btn-res-menu').addEventListener('click', () => quitToMenu());
     $('#btn-touch-ok').addEventListener('click', () => closeModal());
     $('#btn-touch-buttons').addEventListener('click', () => {
@@ -1761,6 +2159,7 @@
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        saveRun(true);
         pause();
         input.releaseAll();
         Audio.suspend();
@@ -1812,13 +2211,14 @@
     setupFullscreen();
     setupPointerLight();
     layout();
+    setupTilt();
     refreshMenu();
     setScreen('menu');
     logo.replay(performance.now());
     registerServiceWorker();
     requestAnimationFrame(frame);
     // Debug/test hook (harmless in production).
-    window.__tetris = { app, settings, records, profile, startGame, pause, resume, layout };
+    window.__tetris = { app, settings, records, profile, startGame, pause, resume, layout, quit: quitToMenu };
   }
 
   boot();

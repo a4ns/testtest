@@ -14,7 +14,7 @@
   --bg: #070a1f;
   --ink: #f5f7ff;
   --ink-2: rgba(232, 236, 255, 0.7);
-  --ink-3: rgba(232, 236, 255, 0.46);
+  --ink-3: rgba(232, 236, 255, 0.62);
   --accent: #64d2ff;
   --accent-strong: #0a84ff;
   --good: #30d158;
@@ -33,6 +33,10 @@
   --board-fill: rgba(6, 8, 30, 0.42);
   --scrim: rgba(3, 5, 22, 0.42);
   --text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+  /* Dimming layers keep text legible over busy wallpaper (adaptive tint). */
+  --dim-card: rgba(8, 10, 32, 0.16);
+  --dim-panel: rgba(8, 10, 32, 0.28);
+  --dim-sheet: rgba(8, 10, 32, 0.4);
 
   --blur: 22px;
   --sat: 1.9;
@@ -51,11 +55,11 @@
   --bg: #e2e9fb;
   --ink: #0c1230;
   --ink-2: rgba(16, 24, 60, 0.7);
-  --ink-3: rgba(16, 24, 60, 0.48);
+  --ink-3: rgba(16, 24, 60, 0.64);
   --accent: #0a84ff;
   --accent-strong: #0060df;
-  --glass-top: rgba(255, 255, 255, 0.66);
-  --glass-bottom: rgba(255, 255, 255, 0.34);
+  --glass-top: rgba(255, 255, 255, 0.5);
+  --glass-bottom: rgba(255, 255, 255, 0.2);
   --glass-rim: rgba(255, 255, 255, 1);
   --glass-rim-soft: rgba(255, 255, 255, 0.55);
   --glass-inner: rgba(255, 255, 255, 0.5);
@@ -66,6 +70,9 @@
   --board-fill: rgba(255, 255, 255, 0.34);
   --scrim: rgba(210, 220, 250, 0.35);
   --text-shadow: none;
+  --dim-card: rgba(255, 255, 255, 0.1);
+  --dim-panel: rgba(255, 255, 255, 0.18);
+  --dim-sheet: rgba(255, 255, 255, 0.34);
   color-scheme: light;
 }
 
@@ -137,6 +144,10 @@ button {
   background: var(--bg);
 }
 
+.wallpaper-fx {
+  background: transparent;
+}
+
 .grain {
   position: fixed;
   inset: -50%;
@@ -152,7 +163,9 @@ button {
 .glass {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
+  --lens-blur: 3px;
+  --lens-sat: 1.7;
+  background: linear-gradient(var(--dim, transparent), var(--dim, transparent)), linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
   -webkit-backdrop-filter: blur(var(--blur)) saturate(var(--sat));
   backdrop-filter: blur(var(--blur)) saturate(var(--sat));
   border-radius: var(--radius);
@@ -236,6 +249,7 @@ button {
   color: var(--ink);
   transition: transform 0.45s var(--spring), filter 0.2s;
   touch-action: manipulation;
+  white-space: nowrap;
 }
 
 .btn svg {
@@ -255,13 +269,15 @@ button {
 }
 
 .btn-primary {
-  background: linear-gradient(180deg, rgba(100, 210, 255, 0.7), rgba(10, 132, 255, 0.62));
+  /* Tinted glass, dense enough for white text to read (≥ 4.5:1). */
+  background: linear-gradient(180deg, rgba(26, 124, 245, 0.94), rgba(0, 88, 200, 0.94));
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 40, 90, 0.35);
-}
-
-:root[data-scheme="light"] .btn-primary {
-  background: linear-gradient(180deg, rgba(64, 160, 255, 0.92), rgba(10, 110, 240, 0.9));
+  text-shadow: 0 1px 2px rgba(0, 30, 80, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 12px 28px -12px rgba(10, 100, 230, 0.85);
 }
 
 .btn-danger {
@@ -314,7 +330,7 @@ button {
   padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   column-gap: var(--gap, 18px);
   row-gap: 10px;
-  grid-template-columns: 1fr var(--side) var(--board-w) var(--side) 1fr;
+  grid-template-columns: minmax(0, 1fr) var(--side) var(--board-w) var(--side) minmax(0, 1fr);
   grid-template-rows: auto 1fr auto auto 1fr auto;
   grid-template-areas:
     "pause . mode . fs"
@@ -368,6 +384,10 @@ button {
 }
 
 .panel {
+  --dim: var(--dim-panel);
+  --lens-blur: 7px;
+  --lens-sat: 1.4;
+  --sat: 1.5;
   padding: 12px 14px 14px;
   border-radius: calc(var(--radius) - 2px);
   display: flex;
@@ -428,8 +448,10 @@ button {
   color: var(--ink-3);
 }
 
+/* Values shrink to fit their box: --chars is set per value by the HUD. */
 .stat-value {
-  font-size: clamp(16px, calc(var(--cell) * 0.72), 26px);
+  --fs: clamp(16px, calc(var(--cell) * 0.72), 26px);
+  font-size: min(var(--fs), calc(var(--fit-w, 200px) / (var(--chars, 4) * 0.62)));
   font-weight: 700;
   line-height: 1.05;
   color: var(--ink);
@@ -437,7 +459,7 @@ button {
 }
 
 .stat-primary .stat-value {
-  font-size: clamp(20px, calc(var(--cell) * 1), 34px);
+  --fs: clamp(20px, calc(var(--cell) * 1), 34px);
   font-weight: 800;
   letter-spacing: -0.01em;
 }
@@ -513,6 +535,8 @@ button {
   inset: 0;
   --radius: calc(var(--cell) * 0.6 + var(--bpad));
   --blur: 26px;
+  --lens-blur: 16px;
+  --lens-sat: 1.3;
   background: linear-gradient(180deg, var(--board-fill), var(--board-fill)), linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
   transition: box-shadow 0.4s;
 }
@@ -536,6 +560,14 @@ button {
       0 0 18px -6px rgba(255, 69, 58, 0.3),
       0 20px 44px -20px var(--glass-shadow);
   }
+}
+
+/* While paused the stack is veiled, so a pause can't be used to plan. */
+.board-shell.is-veiled .board-canvas,
+.board-shell.is-veiled .callouts {
+  filter: blur(calc(var(--cell) * 0.5)) saturate(0.7);
+  opacity: 0.55;
+  transition: filter 0.3s, opacity 0.3s;
 }
 
 .board-canvas {
@@ -570,7 +602,8 @@ button {
 }
 
 .callout-main {
-  font: 850 clamp(20px, calc(var(--cell) * 1.15), 46px) / 1 var(--font-display);
+  /* Never wider than the board: --chars is set per callout. */
+  font: 850 min(clamp(20px, calc(var(--cell) * 1.15), 46px), calc(var(--board-w) * 0.9 / (var(--chars, 6) * 0.78))) / 1 var(--font-display);
   letter-spacing: 0.04em;
   color: #fff;
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45), 0 0 2px rgba(0, 0, 0, 0.3);
@@ -619,7 +652,7 @@ button {
 }
 
 .callout-level .callout-main {
-  font-size: clamp(16px, calc(var(--cell) * 0.8), 30px);
+  font-size: min(clamp(16px, calc(var(--cell) * 0.8), 30px), calc(var(--board-w) * 0.9 / (var(--chars, 6) * 0.95)));
   letter-spacing: 0.22em;
 }
 
@@ -655,7 +688,24 @@ button {
 }
 
 :root[data-scheme="light"] .callout-pc .callout-main {
+  color: transparent;
+  text-shadow: none;
   filter: drop-shadow(0 2px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 3px 8px rgba(20, 30, 80, 0.3));
+}
+
+.callout-split .callout-main {
+  font-size: clamp(14px, calc(var(--cell) * 0.62), 24px);
+  letter-spacing: 0.18em;
+}
+
+.callout-split.ahead .callout-sub {
+  color: #fff;
+  background: rgba(48, 209, 88, 0.55);
+}
+
+.callout-split.behind .callout-sub {
+  color: #fff;
+  background: rgba(255, 69, 58, 0.55);
 }
 
 @keyframes callout {
@@ -705,6 +755,11 @@ button {
   -webkit-background-clip: text;
   background-clip: text;
   filter: drop-shadow(0 4px 22px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 18px rgba(10, 132, 255, 0.35));
+}
+
+.countdown span.ready {
+  font-size: calc(var(--cell) * 1.7);
+  letter-spacing: 0.12em;
 }
 
 .countdown span.go {
@@ -759,7 +814,7 @@ button {
 
 .pad-cluster {
   display: grid;
-  gap: 10px;
+  gap: var(--pad-gap, 10px);
 }
 
 .pad-left {
@@ -839,7 +894,7 @@ button {
 /* --------------------------------------------------------- tall (phones) */
 
 .game.tall {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   grid-template-rows: auto auto 1fr auto;
   grid-template-areas:
     "pause stats fs"
@@ -889,26 +944,107 @@ button {
   justify-content: space-around;
   align-items: center;
   align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
 }
 
 .game.tall .stat {
+  flex: 1 1 0;
   align-items: center;
+}
+
+.game.tall.narrow .stat:nth-child(4) {
+  display: none;
 }
 
 .game.tall .stat-label {
   font-size: 9px;
 }
 
-.game.tall .stat-value,
-.game.tall .stat-primary .stat-value {
-  font-size: 16px;
+.game.tall .stat-value {
+  --fs: 16px;
 }
 
 .game.tall .stat-primary .stat-value {
-  font-size: 18px;
+  --fs: 18px;
+}
+
+/* ------------------------------------------------- short (landscape phone) */
+
+.game.short {
+  grid-template-columns: minmax(0, 1fr) var(--board-w) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "pause board fs"
+    "hold board next"
+    "stats board next"
+    "padl board padr";
+  column-gap: 12px;
+  row-gap: 8px;
+}
+
+.game.short .mode-pill,
+.game.short .panel-goal {
+  display: none;
+}
+
+.game.short .board-shell {
+  margin-top: calc(var(--cell) * 0.8);
+  align-self: center;
+}
+
+.game.short .panel-hold,
+.game.short .panel-stats {
+  justify-self: end;
+}
+
+.game.short .panel-next {
+  justify-self: start;
+  align-self: start;
+}
+
+.game.short .panel {
+  padding: 8px 10px 10px;
+  gap: 4px;
+  border-radius: 18px;
+}
+
+.game.short .panel-stats {
+  align-self: start;
+  width: var(--short-stats-w, 140px);
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.game.short .stat-label {
+  font-size: 9px;
+}
+
+.game.short .stat-value {
+  --fs: 15px;
+}
+
+.game.short .stat-primary .stat-value {
+  --fs: 19px;
+}
+
+.game.short.show-pad .touch-pad {
+  display: contents;
+}
+
+.game.short .pad-left {
+  grid-area: padl;
+  justify-self: start;
+  align-self: end;
+}
+
+.game.short .pad-right {
+  grid-area: padr;
+  justify-self: end;
+  align-self: end;
 }
 
 /* --------------------------------------------------------------- screens */
@@ -978,6 +1114,10 @@ button {
 }
 
 .sheet {
+  --dim: var(--dim-sheet);
+  --lens-blur: 12px;
+  --lens-sat: 1.5;
+  --sat: 1.6;
   width: min(520px, 100%);
   padding: 28px;
   border-radius: 34px;
@@ -1069,7 +1209,126 @@ button {
   width: 100%;
 }
 
+/* Continue banner: a slim glass capsule above the modes. */
+.continue {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 6px;
+  border-radius: 999px;
+  --dim: var(--dim-card);
+}
+
+.continue-main {
+  appearance: none;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px;
+  border-radius: 999px;
+  color: var(--ink);
+  text-align: left;
+  transition: transform 0.45s var(--spring);
+}
+
+.continue-main:hover {
+  transform: scale(1.015);
+}
+
+.continue-main:active {
+  transform: scale(0.98);
+}
+
+.continue-icon {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(26, 124, 245, 0.94), rgba(0, 88, 200, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 8px 20px -8px rgba(10, 100, 230, 0.8);
+}
+
+.continue-icon svg {
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+}
+
+.continue-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.continue-text b {
+  font: 700 15.5px/1.2 var(--font-display);
+}
+
+.continue-text small {
+  font: 600 12.5px/1.2 var(--font-num);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.continue-discard {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  background: var(--well);
+  color: var(--ink-2);
+}
+
+.continue-discard svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mode-daily {
+  grid-column: 1 / -1;
+}
+
+.daily-date {
+  margin-left: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  vertical-align: 2px;
+  font: 750 11px/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--tint) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 55%, transparent);
+}
+
+.mode-best .streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-2);
+}
+
+.mode-best .streak svg {
+  width: 13px;
+  height: 13px;
+  color: #ff9f0a;
+}
+
 .mode-card {
+  --dim: var(--dim-card);
+  --lens-blur: 5px;
   appearance: none;
   border: 0;
   cursor: pointer;
@@ -1231,6 +1490,36 @@ kbd {
     transform: scale(0.4);
     opacity: 0;
   }
+}
+
+.res-unlocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.unlock-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px 6px 8px;
+  border-radius: 999px;
+  font: 700 12.5px/1 var(--font-ui);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent);
+  animation: badge 0.7s var(--spring) both 0.35s;
+}
+
+.unlock-chip svg {
+  width: 14px;
+  height: 14px;
+  color: var(--gold);
+}
+
+:root[data-scheme="light"] .unlock-chip svg {
+  color: #c48a00;
 }
 
 .res-stats {
@@ -1987,6 +2276,12 @@ input[type="range"]:focus-visible::-moz-range-thumb {
   .row:has(.segmented) {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 360px) {
+  .sheet-actions.row .btn {
+    padding: 0 14px;
   }
 }
 

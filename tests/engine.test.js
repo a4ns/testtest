@@ -404,3 +404,59 @@ test('a random game played with hard drops always keeps a valid board', () => {
     assert.ok(g.stats.pieces > 5);
   }
 });
+
+test('serialize/restore continues the exact same game', () => {
+  const a = new Game({ seed: 77 });
+  a.start();
+  const rand = E.mulberry32(5);
+  const step = (g, r) => {
+    if (r < 0.3) g.move(-1);
+    else if (r < 0.6) g.move(1);
+    else if (r < 0.75) g.rotate(1);
+    else if (r < 0.8) g.hold();
+    else g.hardDrop();
+    g.update(16);
+  };
+  for (let i = 0; i < 40; i++) step(a, rand());
+  assert.equal(a.state, 'playing');
+  const snap = JSON.parse(JSON.stringify(a.serialize()));
+  const b = Game.restore(snap);
+  assert.ok(b);
+  const ra = E.mulberry32(9);
+  const rb = E.mulberry32(9);
+  for (let i = 0; i < 300 && a.state === 'playing'; i++) {
+    step(a, ra());
+    step(b, rb());
+  }
+  assert.deepEqual(b.board, a.board);
+  assert.deepEqual(b.queue, a.queue);
+  assert.equal(b.score, a.score);
+  assert.equal(b.state, a.state);
+});
+
+test('restore rejects corrupt snapshots', () => {
+  const g = new Game({ seed: 3 });
+  g.start();
+  const snap = g.serialize();
+  assert.equal(Game.restore(null), null);
+  assert.equal(Game.restore(Object.assign({}, snap, { board: [] })), null);
+  assert.equal(Game.restore(Object.assign({}, snap, { queue: ['Q'] })), null);
+  assert.equal(Game.restore(Object.assign({}, snap, { score: 'lots' })), null);
+  assert.equal(Game.restore(Object.assign({}, snap, { active: { type: 'T', rot: 0, x: -5, y: 0 } })), null);
+  assert.ok(Game.restore(snap));
+});
+
+test('daily seeds are stable per date and differ between dates', () => {
+  assert.equal(E.hashSeed('2026-10-11'), E.hashSeed('2026-10-11'));
+  assert.notEqual(E.hashSeed('2026-10-11'), E.hashSeed('2026-10-12'));
+  const a = new Game({ mode: 'daily', seed: E.hashSeed('2026-10-11') });
+  const b = new Game({ mode: 'daily', seed: E.hashSeed('2026-10-11') });
+  assert.deepEqual(a.queue, b.queue);
+  assert.equal(a.rules.timeLimit, 120000);
+});
+
+test('start level only applies to marathon', () => {
+  assert.equal(new Game({ mode: 'marathon', startLevel: 7 }).level, 7);
+  assert.equal(new Game({ mode: 'ultra', startLevel: 7 }).level, 1);
+  assert.equal(new Game({ mode: 'zen', startLevel: 7 }).level, 1);
+});

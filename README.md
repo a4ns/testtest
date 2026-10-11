@@ -9,8 +9,9 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 
 ## Play
 
-- **Marathon** — endless; gravity speeds up every 10 lines (guideline curve up to level 20).
-- **Sprint 40L** — clear 40 lines as fast as you can.
+- **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; build a streak.
+- **Marathon** — endless; gravity speeds up every 10 lines (guideline curve up to level 20). Save & quit any time and continue later.
+- **Sprint 40L** — clear 40 lines as fast as you can, with your pace against your best at 10, 20 and 30 lines.
 - **Ultra 2:00** — score as much as you can in two minutes.
 - **Zen** — no game over; when the stack tops out it shatters and you keep going.
 
@@ -45,7 +46,9 @@ Y 180°, bumpers hold, Start pause).
 - **Sound:** all effects and both soundtracks (the ambient *Glass Garden* and a
   glassy *Korobeiniki*) are synthesized live with the Web Audio API. Combos
   climb a pentatonic scale; the music speeds up with the level.
-- **Progression:** personal top-10 per mode, 20 achievements, lifetime stats.
+- **Progression:** personal top-10 per mode, 23 achievements, daily streaks, lifetime stats,
+  resumable Marathon/Zen runs, one-key instant retry (R).
+- **Layouts** for desktop, portrait phones and landscape phones, with touch gestures or buttons.
 - **Installable PWA** with offline support (when served over HTTPS).
 - **Accessible:** full keyboard and gamepad navigation, reduced-motion and
   reduced-transparency support, three glass materials (Liquid, Frosted, Solid).
@@ -56,6 +59,7 @@ Y 180°, bumpers hold, Start pause).
 npm test            # rules-engine unit tests (node:test, no dependencies)
 npm run serve       # http://localhost:8080
 node scripts/smoke.mjs .smoke   # headless-browser smoke test + screenshots (needs Playwright)
+node scripts/layout-check.mjs    # no overflow at 13 viewports with worst-case HUD values
 npm run build       # dist/liquid-glass-tetris.html, a single self-contained file
 ```
 

@@ -104,10 +104,13 @@
   const PERFECT_CLEAR_B2B_TETRIS = 3200;
 
   const MODES = {
-    marathon: { name: 'Marathon', levelUp: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 0, topOut: true },
-    sprint: { name: 'Sprint', levelUp: false, fixedLevel: 1, maxGravityLevel: 1, goalLines: 40, timeLimit: 0, topOut: true },
+    // Only Marathon takes a starting level; the others are fixed so their
+    // leaderboards compare like with like.
+    marathon: { name: 'Marathon', levelUp: true, startLevel: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 0, topOut: true },
+    sprint: { name: 'Sprint', levelUp: false, maxGravityLevel: 1, goalLines: 40, timeLimit: 0, topOut: true },
     ultra: { name: 'Ultra', levelUp: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 120000, topOut: true },
     zen: { name: 'Zen', levelUp: true, maxGravityLevel: 5, goalLines: 0, timeLimit: 0, topOut: false },
+    daily: { name: 'Daily', levelUp: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 120000, topOut: true },
   };
 
   /** Milliseconds per row at a level (guideline gravity curve). */
@@ -119,19 +122,24 @@
   /** Small, fast, seedable PRNG. */
   function mulberry32(seed) {
     let a = seed >>> 0;
-    return function () {
+    const next = function () {
       a = (a + 0x6d2b79f5) >>> 0;
       let t = a;
       t = Math.imul(t ^ (t >>> 15), t | 1);
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+    next.getState = () => a;
+    next.setState = (v) => {
+      a = v >>> 0;
+    };
+    return next;
   }
 
   /** 7-bag randomizer: every piece once per bag, in random order. */
   function createBag(rand) {
     let bag = [];
-    return function next() {
+    const next = function () {
       if (bag.length === 0) {
         bag = PIECE_TYPES.slice();
         for (let i = bag.length - 1; i > 0; i--) {
@@ -143,6 +151,21 @@
       }
       return bag.pop();
     };
+    next.getBag = () => bag.slice();
+    next.setBag = (b) => {
+      bag = b.slice();
+    };
+    return next;
+  }
+
+  /** Stable 32-bit seed from a string (e.g. a date for the daily challenge). */
+  function hashSeed(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
   }
 
   function makeBoard() {
@@ -159,7 +182,7 @@
     constructor(options = {}) {
       this.mode = MODES[options.mode] ? options.mode : 'marathon';
       this.rules = MODES[this.mode];
-      this.startLevel = this.rules.fixedLevel || clamp(Math.floor(options.startLevel || 1), 1, 20);
+      this.startLevel = this.rules.startLevel ? clamp(Math.floor(options.startLevel || 1), 1, 20) : 1;
       this.seed = (options.seed == null ? Math.floor(Math.random() * 4294967296) : options.seed) >>> 0;
       this.lockDelay = options.lockDelay == null ? 500 : options.lockDelay;
       this.maxLockResets = options.maxLockResets == null ? 15 : options.maxLockResets;
@@ -642,6 +665,82 @@
       this.events = [];
       return out;
     }
+
+    // ---- save / restore ---------------------------------------------------
+
+    /** Plain-JSON snapshot of a game in progress (used to resume later). */
+    serialize() {
+      return {
+        v: 1,
+        mode: this.mode,
+        seed: this.seed,
+        rng: this.rand.getState(),
+        bag: this.nextFromBag.getBag(),
+        board: this.board.map((row) => row.slice()),
+        queue: this.queue.slice(),
+        active: this.active ? { type: this.active.type, rot: this.active.rot, x: this.active.x, y: this.active.y } : null,
+        holdType: this.holdType,
+        holdUsed: this.holdUsed,
+        score: this.score,
+        lines: this.lines,
+        level: this.level,
+        startLevel: this.startLevel,
+        combo: this.combo,
+        b2b: this.b2b,
+        time: this.time,
+        stats: Object.assign({}, this.stats),
+        state: this.state,
+      };
+    }
+
+    /** Rebuilds a game from serialize() output; returns null if it's invalid. */
+    static restore(data, options = {}) {
+      try {
+        if (!data || data.v !== 1 || !MODES[data.mode]) return null;
+        const isPiece = (t) => PIECE_TYPES.indexOf(t) !== -1;
+        const int = (v) => typeof v === 'number' && isFinite(v) && Math.floor(v) === v;
+        if (!Array.isArray(data.board) || data.board.length !== ROWS) return null;
+        for (const row of data.board) {
+          if (!Array.isArray(row) || row.length !== COLS || !row.every((v) => int(v) && v >= 0 && v <= 8)) return null;
+        }
+        if (!Array.isArray(data.queue) || !data.queue.length || !data.queue.every(isPiece)) return null;
+        if (!Array.isArray(data.bag) || !data.bag.every(isPiece)) return null;
+        if (data.holdType !== null && !isPiece(data.holdType)) return null;
+        const a = data.active;
+        if (!a || !isPiece(a.type) || ![0, 1, 2, 3].includes(a.rot) || !int(a.x) || !int(a.y)) return null;
+        for (const k of ['score', 'lines', 'level', 'startLevel', 'combo', 'b2b', 'time', 'seed', 'rng']) {
+          if (typeof data[k] !== 'number' || !isFinite(data[k])) return null;
+        }
+        if (data.state !== 'playing') return null;
+
+        const g = new Game(Object.assign({}, options, { mode: data.mode, seed: data.seed, startLevel: data.startLevel }));
+        g.rand.setState(data.rng);
+        g.nextFromBag.setBag(data.bag);
+        g.board = data.board.map((row) => row.slice());
+        g.queue = data.queue.slice();
+        g.fillQueue();
+        if (g.collides(a.type, a.rot, a.x, a.y)) return null;
+        g.active = { type: a.type, rot: a.rot, x: a.x, y: a.y };
+        g.holdType = data.holdType;
+        g.holdUsed = !!data.holdUsed;
+        g.score = Math.max(0, data.score);
+        g.lines = Math.max(0, data.lines);
+        g.level = clamp(data.level, 1, 999);
+        g.startLevel = clamp(data.startLevel, 1, 20);
+        g.combo = data.combo;
+        g.b2b = data.b2b;
+        g.time = Math.max(0, data.time);
+        if (data.stats && typeof data.stats === 'object') {
+          for (const k of Object.keys(g.stats)) if (typeof data.stats[k] === 'number' && isFinite(data.stats[k])) g.stats[k] = data.stats[k];
+        }
+        g.state = 'playing';
+        g.lowestY = g.active.y;
+        g.events = [];
+        return g;
+      } catch (e) {
+        return null;
+      }
+    }
   }
 
   return {
@@ -662,6 +761,7 @@
     msPerRow,
     mulberry32,
     createBag,
+    hashSeed,
     Game,
   };
 });

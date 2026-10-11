@@ -21,7 +21,7 @@
   }
 
   const supported = detect();
-  const filters = new Map(); // key -> filter id
+  const filters = new Map(); // key -> { id, el, refs }
   const tracked = new Map(); // element -> key
   let enabled = false;
   let defs = null;
@@ -82,9 +82,13 @@
     return c.toDataURL('image/png');
   }
 
-  function filterFor(w, h, r) {
+  function acquire(w, h, r) {
     const key = w + 'x' + h + 'r' + r;
-    if (filters.has(key)) return filters.get(key);
+    const hit = filters.get(key);
+    if (hit) {
+      hit.refs++;
+      return hit.id;
+    }
     const band = Math.max(6, Math.min(r * 1.15, Math.min(w, h) * 0.5, 30));
     const scale = Math.round(Math.max(10, Math.min(46, Math.min(w, h) * 0.4)));
     const id = 'lg-lens-' + ++counter;
@@ -114,8 +118,19 @@
     f.appendChild(fi);
     f.appendChild(dm);
     defs.appendChild(f);
-    filters.set(key, id);
+    filters.set(key, { id, el: f, refs: 1 });
     return id;
+  }
+
+  /** Drops a filter once no element uses it (sizes change on every resize). */
+  function release(key) {
+    const hit = key && filters.get(key);
+    if (!hit) return;
+    hit.refs--;
+    if (hit.refs <= 0) {
+      hit.el.remove();
+      filters.delete(key);
+    }
   }
 
   function radiusOf(el, w, h) {
@@ -131,16 +146,21 @@
     const r = radiusOf(el, w, h);
     const key = w + 'x' + h + 'r' + r;
     if (tracked.get(el) === key) return;
+    release(tracked.get(el));
     tracked.set(el, key);
-    const id = filterFor(w, h, r);
-    const blur = parseFloat(getComputedStyle(el).getPropertyValue('--blur')) || 20;
-    // Less frost than the fallback so the bending stays visible.
-    const value = 'url(#' + id + ') blur(' + Math.round(blur * 0.55) + 'px) saturate(1.9) brightness(1.04)';
+    const id = acquire(w, h, r);
+    const cs = getComputedStyle(el);
+    // Liquid glass is mostly clear: a little frost, the bending does the work.
+    const blur = parseFloat(cs.getPropertyValue('--lens-blur'));
+    const sat = parseFloat(cs.getPropertyValue('--lens-sat')) || 1.6;
+    const value = 'url(#' + id + ') blur(' + (isNaN(blur) ? 4 : blur) + 'px) saturate(' + sat + ') brightness(1.04)';
     el.style.backdropFilter = value;
     el.style.webkitBackdropFilter = value;
   }
 
   function clear(el) {
+    release(tracked.get(el));
+    tracked.delete(el);
     el.style.backdropFilter = '';
     el.style.webkitBackdropFilter = '';
   }
@@ -171,7 +191,6 @@
           update(el);
         } else {
           if (observer) observer.unobserve(el);
-          tracked.delete(el);
           clear(el);
         }
       });
@@ -179,10 +198,15 @@
     /** Re-measure (after a screen opens or the layout changes). */
     refresh() {
       if (!enabled) return;
+      for (const el of Array.from(tracked.keys())) if (!el.isConnected) clear(el);
       document.querySelectorAll('.glass:not(.no-lens)').forEach((el) => {
         if (observer) observer.observe(el);
         update(el);
       });
+    },
+    /** Number of live filters (for leak tests). */
+    get filterCount() {
+      return filters.size;
     },
   };
 

@@ -120,7 +120,12 @@
     update(dt) {
       this.pollGamepads(dt);
       const game = this.getGame();
-      if (!game || !this.dir) return;
+      if (!game) {
+        // Charge DAS during the countdown so a held direction fires at GO.
+        if (this.dir && this.handlers.canCharge && this.handlers.canCharge()) this.das = Math.min(this.das + dt, this.settings.das);
+        return;
+      }
+      if (!this.dir) return;
       const das = this.settings.das;
       const arr = this.settings.arr;
       const before = this.das;

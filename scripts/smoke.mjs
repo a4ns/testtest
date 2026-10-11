@@ -4,11 +4,11 @@
 //   node scripts/smoke.mjs [outDir]
 //
 // Needs Playwright (globally installed is fine: NODE_PATH=$(npm root -g)).
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
+import { startServer } from './serve-lib.mjs';
 
 const require = createRequire(import.meta.url);
 let playwright;
@@ -24,36 +24,8 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const outDir = path.resolve(process.argv[2] || path.join(root, '.smoke'));
 fs.mkdirSync(outDir, { recursive: true });
 
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.webmanifest': 'application/manifest+json',
-  '.json': 'application/json',
-};
+const { url: base, close: closeServer } = await startServer(root);
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  let file = path.join(root, decodeURIComponent(url.pathname));
-  if (!file.startsWith(root)) {
-    res.writeHead(403).end();
-    return;
-  }
-  if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
-  fs.readFile(file, (err, data) => {
-    if (err) {
-      res.writeHead(404).end('not found');
-      return;
-    }
-    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
-    res.end(data);
-  });
-});
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const base = `http://127.0.0.1:${server.address().port}/`;
 
 const problems = [];
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -163,6 +135,73 @@ try {
         await sleep(400);
       }
     }
+
+    // Save & quit a Marathon, then continue it from the menu banner.
+    await page.click('.mode-card[data-mode="marathon"]');
+    await sleep(1600);
+    for (const k of ['ArrowLeft', 'Space', 'ArrowRight', 'Space', 'Space']) {
+      await page.keyboard.press(k);
+      await sleep(70);
+    }
+    const before = await page.evaluate(() => window.__tetris.app.game.stats.pieces);
+    await page.keyboard.press('Escape');
+    await sleep(500);
+    await page.click('#btn-quit');
+    await sleep(700);
+    if (await page.locator('#continue').isHidden()) problems.push('continue banner missing after Save & quit');
+    await shot(page, '14-continue-banner');
+    await page.click('#btn-continue');
+    await sleep(1700);
+    const after = await page.evaluate(() => ({ s: window.__tetris.app.screen, p: window.__tetris.app.game.stats.pieces }));
+    if (after.s !== 'playing' || after.p !== before) problems.push('continue did not restore the run: ' + JSON.stringify(after) + ' vs ' + before);
+    await page.keyboard.press('Escape');
+    await sleep(400);
+    await page.click('#btn-quit');
+    await sleep(500);
+    await page.click('#btn-discard');
+    await sleep(300);
+    if (await page.locator('#continue').isVisible()) problems.push('discard did not hide the banner');
+
+    // Sprint split callout at 10 lines.
+    await page.click('.mode-card[data-mode="sprint"]');
+    await sleep(1700);
+    await page.evaluate(() => {
+      const g = window.__tetris.app.game;
+      g.lines = 9;
+      for (let x = 0; x < 6; x++) g.board[39][x] = 2;
+      g.active = { type: 'I', rot: 0, x: 6, y: 30 };
+    });
+    await page.keyboard.press('Space');
+    await sleep(250);
+    await shot(page, '15-sprint-split');
+    const splits = await page.evaluate(() => window.__tetris.app.splits.length);
+    if (splits !== 1) problems.push('expected one sprint split, got ' + splits);
+    await page.keyboard.press('Escape');
+    await sleep(400);
+    await page.click('#btn-quit');
+    await sleep(500);
+
+    // Daily challenge: same first pieces on two starts.
+    await page.click('.mode-card[data-mode="daily"]');
+    await sleep(500);
+    const q1 = await page.evaluate(() => window.__tetris.app.game.queue.join(''));
+    await sleep(1400);
+    await shot(page, '16-daily');
+    await page.keyboard.press('Escape');
+    await sleep(400);
+    await page.keyboard.press('KeyR');
+    await sleep(200);
+    const q2 = await page.evaluate(() => window.__tetris.app.game.queue.join(''));
+    if (q1 !== q2) problems.push('daily queue differs between attempts');
+    await sleep(900);
+    await page.evaluate(() => {
+      window.__tetris.app.game.time = 119900;
+    });
+    await sleep(1800);
+    await shot(page, '17-daily-results');
+    await page.click('#btn-res-menu');
+    await sleep(500);
+    await shot(page, '18-menu-after-daily');
 
     // Light wallpaper.
     await page.evaluate(() => {
@@ -281,7 +320,7 @@ try {
   problems.push('[harness] ' + (e && e.stack ? e.stack : e));
 } finally {
   await browser.close();
-  server.close();
+  closeServer();
 }
 
 if (problems.length) {
