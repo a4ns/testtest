@@ -1,0 +1,17 @@
+{
+  "name": "Liquid Glass Tetris",
+  "short_name": "Glass Tetris",
+  "description": "A falling-block puzzle game made of Liquid Glass.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070a1f",
+  "theme_color": "#070a1f",
+  "categories": ["games"],
+  "icons": [
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

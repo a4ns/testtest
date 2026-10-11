@@ -1,0 +1,12 @@
+{
+  "name": "liquid-glass-tetris",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A falling-block puzzle game made of Liquid Glass.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "serve": "npx --yes http-server -c-1 -p 8080 .",
+    "build": "node scripts/build.mjs"
+  },
+  "license": "MIT"
+}
