@@ -80,6 +80,26 @@
     { id: 'prism', name: 'Prism', level: 20 },
   ];
 
+  // Glass tiers: a title and ring colour for the player level, so every
+  // stretch of levels (including far past 20) has something to reach.
+  const TIERS = [
+    { level: 1, name: 'Clear', color: '#9fb4ff' },
+    { level: 5, name: 'Frost', color: '#7fe9ff' },
+    { level: 10, name: 'Crystal', color: '#64d2ff' },
+    { level: 15, name: 'Prism', color: '#bf5af2' },
+    { level: 20, name: 'Quartz', color: '#ff8fcf' },
+    { level: 25, name: 'Sapphire', color: '#0a84ff' },
+    { level: 30, name: 'Opal', color: '#7dffd8' },
+    { level: 40, name: 'Obsidian', color: '#c2c2d6' },
+    { level: 50, name: 'Diamond', color: '#ffffff' },
+  ];
+
+  function tierFor(level) {
+    let t = TIERS[0];
+    for (const x of TIERS) if (level >= x.level) t = x;
+    return t;
+  }
+
   /** Experience earned from everything you've done, ever. */
   function playerXP(p) {
     const ach = p && p.achievements ? Object.keys(p.achievements).length : 0;
@@ -128,6 +148,7 @@
     { id: 'combo5', name: 'Flow State', desc: 'Reach a 5 combo.' },
     { id: 'combo10', name: 'Unstoppable', desc: 'Reach a 10 combo.' },
     { id: 'pc', name: 'Crystal Clear', desc: 'Empty the whole field with a Perfect Clear.' },
+    { id: 'marathon150', name: 'Finish Line', desc: 'Clear 150 lines in a Marathon started at level 1.' },
     { id: 'level10', name: 'Momentum', desc: 'Climb 9 levels in one Marathon (1 → 10).' },
     { id: 'level15', name: 'Velocity', desc: 'Climb 14 levels in one Marathon (1 → 15).' },
     { id: 'level20', name: 'Terminal Velocity', desc: 'Climb 19 levels in one Marathon (1 → 20).' },
@@ -157,11 +178,13 @@
     }
   }
 
+  let onWriteFail = null;
   function save(key, value) {
     try {
       root.localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
+      if (onWriteFail) onWriteFail(key);
       return false;
     }
   }
@@ -207,7 +230,7 @@
   };
   const CHOICES = {
     track: ['glass', 'classic', 'off'],
-    wallpaper: ['auto', 'aurora', 'sunset', 'lagoon', 'graphite', 'daylight'],
+    wallpaper: ['auto', 'aurora', 'sunset', 'lagoon', 'graphite', 'daylight', 'nebula', 'blossom'],
     glass: ['high', 'standard', 'low'],
     touch: ['gestures', 'buttons'],
     skin: SKINS.map((k) => k.id),
@@ -286,7 +309,15 @@
   }
 
   /** Inserts a run; returns its 1-based rank, or 0 if it didn't place. */
+  /** Another tab may have written since we loaded: take its view first. */
+  function syncInto(target, fresh) {
+    for (const k of Object.keys(target)) if (!(k in fresh)) delete target[k];
+    Object.assign(target, fresh);
+    return target;
+  }
+
   function addRecord(records, mode, run) {
+    syncInto(records, loadRecords());
     const list = records[mode] || (records[mode] = []);
     list.push(run);
     list.sort((a, b) => compareRuns(mode, a, b));
@@ -314,6 +345,8 @@
       bestScore: 0,
       achievements: {},
       seenTouchHelp: false,
+      // Every finished or abandoned run (games counts only XP-earning ones).
+      runs: 0,
       motionGranted: false,
       // Daily Challenge rewards: first finish of the day, medals, streak.
       bonusXP: 0,
@@ -338,7 +371,15 @@
   }
 
   function saveProfile(p) {
-    save(KEYS.profile, p);
+    return save(KEYS.profile, p);
+  }
+
+  /** Re-reads the stored profile into p, applies a change and saves, so two
+   * open tabs add to each other's progress instead of overwriting it. */
+  function updateProfile(p, change) {
+    syncInto(p, loadProfile());
+    change(p);
+    return save(KEYS.profile, p);
   }
 
   // ---- resumable runs (Marathon, Zen) ----------------------------------
@@ -437,6 +478,7 @@
 
   function pushRecent(recent, mode, value) {
     if (!finite(value)) return recent;
+    syncInto(recent, loadRecent());
     const list = recent[mode] || (recent[mode] = []);
     list.push(value);
     while (list.length > 20) list.shift();
@@ -457,6 +499,8 @@
     SKINS,
     playerXP,
     levelInfo,
+    TIERS,
+    tierFor,
     available,
     DAILY_MEDALS,
     dailyMedal,
@@ -469,6 +513,12 @@
     compareRuns,
     loadProfile,
     saveProfile,
+    updateProfile,
+    syncInto,
+    KEYS,
+    set onWriteFail(cb) {
+      onWriteFail = cb;
+    },
     loadSave,
     writeSave,
     clearSave,

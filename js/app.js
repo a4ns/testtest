@@ -194,7 +194,8 @@
   // ---------------------------------------------------------- look & feel
 
   function resolveWallpaper() {
-    if (settings.wallpaper !== 'auto' && WP.WALLPAPERS[settings.wallpaper]) return settings.wallpaper;
+    const chosen = WP.WALLPAPERS[settings.wallpaper];
+    if (settings.wallpaper !== 'auto' && chosen && !(chosen.level > playerLevel().level)) return settings.wallpaper;
     const host = els.root.getAttribute('data-theme');
     if (host === 'light') return 'daylight';
     if (host === 'dark') return 'aurora';
@@ -368,7 +369,7 @@
       nextView.resize(Math.round(mini * 4.4), Math.round(mini * (3.3 + 2.7 * (app.nextCount - 1))), dpr);
     }
 
-    const logoCell = clamp(Math.floor(Math.min((Math.min(vw - 48, 560)) / 24, (vh * 0.14) / 5.5)), 6, 22);
+    const logoCell = clamp(Math.floor(Math.min((Math.min(vw - 48, 560)) / 24, (vh * (vh < 860 ? 0.115 : 0.14)) / 5.5)), 6, 22);
     logo.resize(logoCell, dpr);
     wall.resize();
     app.hud = {};
@@ -527,7 +528,10 @@
     els.screens.paused.classList.toggle('is-open', name === 'paused');
     els.screens.results.classList.toggle('is-open', name === 'results');
     els.game.classList.toggle('is-hidden', name === 'menu');
-    els.boardShell.classList.toggle('is-veiled', name === 'paused');
+    // Resuming keeps the stack veiled until GO, so pausing never buys a free look.
+    const resuming = name === 'countdown' && !!app.game && app.game.state === 'playing';
+    els.boardShell.classList.toggle('is-veiled', name === 'paused' || resuming);
+    els.game.classList.toggle('is-resuming', resuming);
     els.game.classList.toggle('is-paused', name === 'paused');
     Audio.duck(name === 'paused');
     updateInert();
@@ -643,7 +647,9 @@
 
   function renderPlayer() {
     const info = playerLevel();
-    $('#player-level').textContent = 'Level ' + info.level;
+    const tier = S.tierFor(info.level);
+    $('#player-level').textContent = 'Level ' + info.level + (info.level >= 5 ? ' · ' + tier.name : '');
+    $('#player').style.setProperty('--tier', tier.color);
     $('#player-xp').textContent = fmtInt(info.xp - info.base) + ' / ' + fmtInt(info.next - info.base) + ' XP';
     $('#player-fill').style.width = (info.frac * 100).toFixed(1) + '%';
     $('#player').setAttribute('aria-label', 'Level ' + info.level + ', ' + fmtInt(info.xp) + ' XP. Open records');
@@ -778,14 +784,15 @@
   // ------------------------------------------------------ saves & lifetime
 
   let lastSaveAt = 0;
+  /** Returns false only when a save was attempted and storage refused it. */
   function saveRun(force) {
     const g = app.game;
-    if (!g || g.state !== 'playing' || SAVE_MODES.indexOf(g.mode) === -1) return;
-    if (!g.stats.pieces) return;
+    if (!g || g.state !== 'playing' || SAVE_MODES.indexOf(g.mode) === -1) return true;
+    if (!g.stats.pieces) return true;
     const now = performance.now();
-    if (!force && now - lastSaveAt < 2000) return;
+    if (!force && now - lastSaveAt < 2000) return true;
     lastSaveAt = now;
-    S.writeSave(g.mode, { game: g.serialize(), savedAt: Date.now(), unlocks: app.runUnlocks.slice() });
+    return S.writeSave(g.mode, { game: g.serialize(), savedAt: Date.now(), unlocks: app.runUnlocks.slice() });
   }
 
   function gameTotals(g) {
@@ -801,20 +808,24 @@
 
   function addLifetime(t) {
     if (!t || (!t.pieces && !t.time)) return;
-    if (realAttempt(t)) profile.games += 1;
-    profile.lines += num(t.lines);
-    profile.pieces += num(t.pieces);
-    profile.tetrises += num(t.tetrises);
-    profile.tspins += num(t.tspins);
-    profile.perfectClears += num(t.pcs);
-    profile.timePlayed += Math.round(num(t.time));
-    profile.bestScore = Math.max(profile.bestScore, num(t.score));
-    // Lifetime milestones can be crossed in a run that's quit or saved.
-    if (profile.lines >= 1000 && !profile.achievements['lines1000']) {
-      profile.achievements['lines1000'] = Date.now();
-      toastAchievement('lines1000');
-    }
-    S.saveProfile(profile);
+    let milestone = false;
+    S.updateProfile(profile, (p) => {
+      p.runs = num(p.runs) + 1;
+      if (realAttempt(t)) p.games += 1;
+      p.lines += num(t.lines);
+      p.pieces += num(t.pieces);
+      p.tetrises += num(t.tetrises);
+      p.tspins += num(t.tspins);
+      p.perfectClears += num(t.pcs);
+      p.timePlayed += Math.round(num(t.time));
+      p.bestScore = Math.max(p.bestScore, num(t.score));
+      // Lifetime milestones can be crossed in a run that's quit or saved.
+      if (p.lines >= 1000 && !p.achievements['lines1000']) {
+        p.achievements['lines1000'] = Date.now();
+        milestone = true;
+      }
+    });
+    if (milestone) toastAchievement('lines1000');
   }
 
   /** A run left unfinished still counts toward lifetime stats. */
@@ -837,8 +848,8 @@
   function quitToMenu() {
     const g = app.game;
     if (g && g.state === 'playing') {
-      if (SAVE_MODES.indexOf(g.mode) !== -1) saveRun(true);
-      else addLifetime(gameTotals(g));
+      // If the run can't be saved, at least its lines and pieces count.
+      if (SAVE_MODES.indexOf(g.mode) === -1 || !saveRun(true)) addLifetime(gameTotals(g));
     }
     app.game = null;
     app.countdown = null;
@@ -896,6 +907,7 @@
     const best = g.mode === 'daily' ? daily.days[app.dailyKey || S.dayKey()] : !isRace(g.mode) && S.bestRun(records, g.mode) ? S.bestRun(records, g.mode).score : 0;
     app.pbScore = typeof best === 'number' && best > 0 ? best : 0;
     app.pbBeaten = false;
+    app.marathonDone = g.mode === 'marathon' && g.lines >= 150;
     showKeysHint(g);
     $('#pause-mode').textContent = MODE_INFO[g.mode].name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
     $('#btn-quit').lastChild.textContent = g.mode === 'zen' ? 'End session' : g.mode === 'marathon' ? 'Save & quit' : 'Main menu';
@@ -904,7 +916,7 @@
   /** First few games on a keyboard: the essential keys, under the board. */
   function showKeysHint(g) {
     const box = $('#keys-hint');
-    const show = !app.coarse && profile.games < 3 && g.stats.pieces === 0;
+    const show = !app.coarse && Math.max(num(profile.runs), profile.games) < 3 && g.stats.pieces === 0;
     box.hidden = !show;
     box.classList.remove('is-leaving');
     app.keysHint = show;
@@ -991,8 +1003,9 @@
       setScreen('countdown');
       app.countdown = null;
       openModal('touchhelp', () => {
-        profile.seenTouchHelp = true;
-        S.saveProfile(profile);
+        S.updateProfile(profile, (p) => {
+          p.seenTouchHelp = true;
+        });
         go();
       });
     } else {
@@ -1141,6 +1154,7 @@
       startCountdown(400, () => {
         if (!app.game) return;
         app.game.start();
+        initialActions();
         setScreen('playing');
         flush();
       });
@@ -1186,6 +1200,7 @@
   function finalizeRun(g, ev) {
     const st = g.stats;
     // XP from achievements earned mid-run belongs to this run's gain.
+    app.writeFailed = false;
     const xpBefore = typeof app.xpStart === 'number' ? Math.min(app.xpStart, S.playerXP(profile)) : S.playerXP(profile);
     const run = {
       score: g.score,
@@ -1209,6 +1224,7 @@
     if (g.mode === 'daily' && ev.result !== 'ended') {
       const before = S.loadDaily();
       const prevDayBest = before.days[run.day];
+      const freezesBefore = before.freezes;
       daily = S.recordDaily(before, run.day, g.score);
       const first = prevDayBest == null;
       const medalXP = (m) => (m ? DAILY_XP.medal[m.id] : 0);
@@ -1216,14 +1232,17 @@
       const newMedal = S.dailyMedal(daily.days[run.day]).got;
       let bonus = Math.max(0, medalXP(newMedal) - medalXP(oldMedal));
       if (first) bonus += DAILY_XP.first + Math.min(DAILY_XP.maxStreakBonus, DAILY_XP.perStreakDay * daily.streak);
-      profile.bonusXP = num(profile.bonusXP) + bonus;
+      S.updateProfile(profile, (p) => {
+        p.bonusXP = num(p.bonusXP) + bonus;
+      });
       app.dailyReward = {
         first,
         bonus,
         medalUp: newMedal && newMedal !== oldMedal ? newMedal : null,
         milestone: first && STREAK_MILESTONES.indexOf(daily.streak) !== -1 ? daily.streak : 0,
         froze: first && daily.frozeOn === S.previousDay(run.day),
-        freezeEarned: first && daily.streak % 7 === 0 && daily.freezes > 0,
+        freezeEarned: first && daily.freezes > freezesBefore - (daily.frozeOn === S.previousDay(run.day) ? 1 : 0),
+        freezesFull: first && daily.streak % 7 === 0 && daily.freezes >= S.MAX_FREEZES,
       };
     }
     // Recent results, for "vs your recent average".
@@ -1248,6 +1267,7 @@
     $('#res-mode').textContent = MODE_INFO[mode].name + (mode === 'daily' && info.run.day ? ' · ' + prettyDay(info.run.day) : '');
     let title = 'Game Over';
     if (info.result === 'cleared') title = mode === 'dig' ? 'Dug out' : 'Sprint complete';
+    else if (mode === 'marathon' && g.lines >= 150 && g.startLevel === 1) title = 'Marathon complete';
     else if (info.result === 'timeup') title = 'Time’s up';
     else if (info.result === 'ended') title = 'Session complete';
     $('#res-title').textContent = title;
@@ -1278,7 +1298,7 @@
       const b = document.createElement('span');
       b.className = 'badge';
       b.innerHTML = '<svg width="14" height="14" aria-hidden="true"><use href="#i-star"/></svg>';
-      let text = info.prevBest ? 'New personal best' : 'First record set';
+      let text = app.writeFailed ? 'Best this session (couldn’t save)' : info.prevBest ? 'New personal best' : 'First record set';
       if (isRace(mode) && info.prevBest) text += ' · −' + ((info.prevBest.time - info.run.time) / 1000).toFixed(2) + 's';
       b.appendChild(document.createTextNode(text));
       slot.appendChild(b);
@@ -1322,6 +1342,7 @@
       else line(daily.streak > 1 ? daily.streak + '-day streak · new pieces tomorrow' : 'New pieces tomorrow');
       if (rw && rw.froze) line('A streak freeze covered the day you missed.');
       else if (rw && rw.freezeEarned) line('Streak freeze earned: one missed day won’t break your streak.');
+      else if (rw && rw.freezesFull) line('Streak freezes full (' + S.MAX_FREEZES + '/' + S.MAX_FREEZES + ').');
     }
 
     const secs = g.time / 1000;
@@ -1366,8 +1387,13 @@
     if (after.level > before.level) {
       // A moment of its own: the new level, big, before anything else.
       $('#res-levelup-num').textContent = String(after.level);
-      const opened = S.SKINS.filter((k) => k.level > before.level && k.level <= after.level).map((k) => k.name);
-      $('#res-levelup-sub').textContent = opened.length ? opened.join(' and ') + ' blocks unlocked' : 'Player level up';
+      const within = (l) => l > before.level && l <= after.level;
+      const opened = []
+        .concat(S.SKINS.filter((k) => within(k.level)).map((k) => k.name + ' blocks'))
+        .concat(Object.keys(WP.WALLPAPERS).filter((k) => within(WP.WALLPAPERS[k].level || 0)).map((k) => WP.WALLPAPERS[k].name + ' wallpaper'))
+        .concat(S.TIERS.filter((t) => t.level > 1 && within(t.level)).map((t) => t.name + ' tier'));
+      $('#res-levelup-sub').textContent = opened.length ? opened.join(' · ') + ' unlocked' : fmtInt(after.next - info.xpAfter) + ' XP to level ' + (after.level + 1);
+      $('#res-levelup').style.setProperty('--tier', S.tierFor(after.level).color);
       lvUp.classList.remove('is-in');
       void lvUp.offsetWidth;
       lvUp.classList.add('is-in');
@@ -1540,6 +1566,18 @@
   }
 
   /** Passing your best score mid-run gets its own moment, once. */
+  /** Marathon's guideline finish line: 150 lines. The run carries on. */
+  function checkMarathonGoal() {
+    const g = app.game;
+    if (!g || g.mode !== 'marathon' || app.marathonDone || g.lines < 150 || g.startLevel !== 1) return;
+    app.marathonDone = true;
+    callout('MARATHON COMPLETE', '150 lines · ' + fmtTime(g.time), 'pc');
+    Audio.play('win');
+    wall.pulse(1.2);
+    haptic([20, 50, 20]);
+    checkAchievements(false);
+  }
+
   function checkLiveBest() {
     const g = app.game;
     if (!g || app.pbBeaten || !app.pbScore || g.score <= app.pbScore || g.state !== 'playing') return;
@@ -1558,6 +1596,7 @@
     if (special) bump(1.5, true);
     if (ev.lines) haptic(special ? [16, 40, 22] : 12);
     clearCallout(ev);
+    checkMarathonGoal();
     checkLiveBest();
     sprintSplits();
     checkAchievements(false);
@@ -1687,6 +1726,7 @@
     if (st.maxCombo >= 5) u('combo5');
     if (st.maxCombo >= 10) u('combo10');
     if (st.perfectClears >= 1) u('pc');
+    if (g.mode === 'marathon' && g.startLevel === 1 && g.lines >= 150) u('marathon150');
     if (g.mode === 'marathon') {
       // Levels climbed in this run: a high start level doesn't hand them out.
       const climb = g.level - g.startLevel + 1;
@@ -1720,7 +1760,10 @@
       }
     }
     if (got.length) {
-      S.saveProfile(profile);
+      const stamp = Date.now();
+      S.updateProfile(profile, (p) => {
+        for (const id of got) if (!p.achievements[id]) p.achievements[id] = stamp;
+      });
       got.forEach((id) => toastAchievement(id));
     }
   }
@@ -1737,6 +1780,14 @@
     if (app.runUnlocks.indexOf(id) === -1) app.runUnlocks.push(id);
     toastQueue.push({ id, title: 'Achievement · ' + a.name, body: a.desc, icon: 'i-star', sound: 'achievement' });
     pumpToasts();
+  }
+
+  let storageWarned = false;
+  function storageWarning(body) {
+    if (storageWarned) return;
+    storageWarned = true;
+    toastQueue.push({ id: 'storage', title: 'Progress won’t be saved', body, icon: 'i-lock' });
+    setTimeout(pumpToasts, 900);
   }
 
   function toastsBlocked() {
@@ -1807,6 +1858,7 @@
     let ringVal;
     let ringLabel;
     let pace = null;
+    let cLabel = null;
     switch (g.mode) {
       case 'sprint': {
         main = fmtTime(g.time, true);
@@ -1842,6 +1894,12 @@
         a = fmtTime(Math.ceil(rem / 1000) * 1000);
         b = fmtInt(g.lines);
         c = String(g.level);
+        if (g.mode === 'daily') {
+          // The next medal to reach, live.
+          const next = S.dailyMedal(g.score).next;
+          cLabel = next ? next.name : 'Gold';
+          c = next ? fmtInt(next.score) : '✓';
+        }
         frac = rem / g.rules.timeLimit;
         ringVal = a;
         ringLabel = 'Time left';
@@ -1863,6 +1921,7 @@
     setText(els.st.a, 'a', a);
     setText(els.st.b, 'b', b);
     setText(els.st.c, 'c', c);
+    if (cLabel) setText(els.st.cL, 'cL', cLabel);
     if (g.mode === 'sprint') {
       setText(els.st.cL, 'cL', pace === null ? 'PPS' : 'Pace');
       const cls = pace === null ? '' : pace <= 0 ? 'ahead' : 'behind';
@@ -1880,7 +1939,7 @@
       els.ringFill.setAttribute('stroke-dashoffset', off);
     }
 
-    if (app.keysHint && (g.stats.pieces >= 3 || g.time > 8000 || g.state !== 'playing')) hideKeysHint();
+    if (app.keysHint && g.state !== 'ready' && (g.stats.pieces >= 3 || g.time > 8000 || g.state !== 'playing')) hideKeysHint();
     holdView.drawHold(g.holdType, g.holdUsed, app.holdCell);
     nextView.drawQueue(g.queue, app.nextCount, app.nextCell, app.tall);
     // Screen readers get the pieces as text (read on demand, not announced).
@@ -2004,7 +2063,18 @@
       $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)));
       positionLens(seg);
     });
-    $$('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === settings.wallpaper)));
+    // Wallpapers that unlock with level show what they need.
+    const lvl = playerLevel().level;
+    $$('.swatch').forEach((b) => {
+      const w = WP.WALLPAPERS[b.dataset.value];
+      const locked = !!(w && w.level > lvl);
+      b.disabled = locked;
+      b.classList.toggle('is-locked', locked);
+      const span = $('span', b);
+      if (span && w) span.textContent = locked ? 'Level ' + w.level : w.name;
+      b.setAttribute('aria-label', w ? w.name + ' wallpaper' + (locked ? ', unlocks at level ' + w.level : '') : 'Automatic wallpaper');
+      b.setAttribute('aria-pressed', String(b.dataset.value === settings.wallpaper));
+    });
     refreshGlassUI();
     renderBindings();
     renderSkins();
@@ -2174,6 +2244,13 @@
       });
     });
 
+    const rseg = $('[data-seg="recordsMode"]');
+    if (rseg) {
+      const edge = () => rseg.classList.toggle('at-end', rseg.scrollLeft + rseg.clientWidth >= rseg.scrollWidth - 2);
+      rseg.addEventListener('scroll', edge, { passive: true });
+      window.addEventListener('resize', edge);
+      requestAnimationFrame(edge);
+    }
     $$('[data-seg]').forEach((seg) => {
       const key = seg.dataset.seg;
       $$('button', seg).forEach((b) => {
@@ -2212,8 +2289,11 @@
       const i = document.createElement('i');
       i.style.setProperty('--sw', swatchBackground(value));
       b.appendChild(i);
-      b.appendChild(document.createTextNode(name));
+      const label = document.createElement('span');
+      label.textContent = name;
+      b.appendChild(label);
       b.addEventListener('click', () => {
+        if (b.disabled) return;
         settings.wallpaper = value;
         $$('.swatch').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
         commit('wallpaper');
@@ -2439,7 +2519,10 @@
 
   function renderRecords() {
     const seg = $('[data-seg="recordsMode"]');
-    if (seg) $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === app.recordsMode)));
+    if (seg) {
+      $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === app.recordsMode)));
+      requestAnimationFrame(() => seg.classList.toggle('at-end', seg.scrollLeft + seg.clientWidth >= seg.scrollWidth - 2));
+    }
     renderRecordList();
     const box = $('#ach-list');
     box.textContent = '';
@@ -2476,7 +2559,7 @@
     const items = [
       ['Player level', String(lvl.level)],
       ['Total XP', fmtInt(lvl.xp)],
-      ['Games', fmtInt(profile.games)],
+      ['Games', fmtInt(Math.max(num(profile.runs), profile.games))],
       ['Lines', fmtInt(profile.lines)],
       ['Pieces', fmtInt(profile.pieces)],
       ['Tetrises', fmtInt(profile.tetrises)],
@@ -2507,9 +2590,10 @@
       score100k: [Math.max(profile.bestScore, 0), 100000],
       ultra30k: [best('ultra', 'score'), 30000],
       ultra60k: [best('ultra', 'score'), 60000],
-      zen200: [best('zen', 'lines'), 200],
+      zen200: [Math.max(best('zen', 'lines'), num(((S.loadSave('zen') || {}).game || {}).lines)), 200],
       streak3: [S.liveStreak(daily, S.dayKey()), 3],
       streak7: [S.liveStreak(daily, S.dayKey()), 7],
+      streak30: [S.liveStreak(daily, S.dayKey()), 30],
     };
   }
 
@@ -2807,8 +2891,9 @@
       .then((r) => r === 'granted')
       .catch(() => false)
       .then((ok) => {
-        profile.motionGranted = ok;
-        S.saveProfile(profile);
+        S.updateProfile(profile, (p) => {
+          p.motionGranted = ok;
+        });
         if (ok) attachTilt();
         return ok;
       });
@@ -3020,10 +3105,21 @@
     refreshMenu();
     setScreen('menu');
     logo.replay(performance.now());
-    if (!S.available()) {
-      toastQueue.push({ id: 'storage', title: 'Progress won’t be saved', body: 'This browser window is blocking storage, so records and settings reset when you leave.', icon: 'i-lock' });
-      setTimeout(pumpToasts, 900);
-    }
+    if (!S.available()) storageWarning('This browser window is blocking storage, so records and settings reset when you leave.');
+    S.onWriteFail = () => {
+      app.writeFailed = true;
+      storageWarning('Storage is full or blocked, so this progress couldn’t be saved.');
+    };
+    // Another tab or window saved progress: take it in so neither overwrites the other.
+    window.addEventListener('storage', (e) => {
+      if (!e.key || e.key.indexOf('lgtetris.') !== 0) return;
+      if (e.key === S.KEYS.records) S.syncInto(records, S.loadRecords());
+      else if (e.key === S.KEYS.profile) S.syncInto(profile, S.loadProfile());
+      else if (e.key === S.KEYS.daily) daily = S.loadDaily();
+      else if (e.key === S.KEYS.recent) recent = S.loadRecent();
+      else return;
+      if (app.screen === 'menu' && !app.modal) refreshMenu();
+    });
     registerServiceWorker();
     requestAnimationFrame(frame);
     // Debug/test hook (harmless in production).

@@ -402,6 +402,19 @@
     return c;
   }
 
+  /** On pale glass, a darker edge keeps light pieces (yellow, cyan) apart
+   * from the board by more than hue alone. */
+  function outlineTile(c, hex, s) {
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.05);
+    const lw = Math.max(1, s * 0.04);
+    roundRect(g, inset + lw / 2, inset + lw / 2, s - inset * 2 - lw, s - inset * 2 - lw, (s - inset * 2) * 0.25);
+    g.lineWidth = lw;
+    g.strokeStyle = rgba(mix(rgb, BLACK, 0.5), 0.55);
+    g.stroke();
+  }
+
   function makeGhost(hex, s, light) {
     const c = makeCanvas(s, s);
     const g = c.getContext('2d');
@@ -410,12 +423,12 @@
     const w = s - inset * 2;
     const r = w * 0.27;
     roundRect(g, inset, inset, w, w, r);
-    g.fillStyle = rgba(rgb, light ? 0.2 : 0.14);
+    g.fillStyle = rgba(light ? mix(rgb, BLACK, 0.2) : rgb, light ? 0.22 : 0.14);
     g.fill();
     const lw = Math.max(1, s * 0.05);
     roundRect(g, inset + lw / 2, inset + lw / 2, w - lw, w - lw, r - lw / 2);
     g.lineWidth = lw;
-    g.strokeStyle = rgba(light ? mix(rgb, BLACK, 0.15) : mix(rgb, WHITE, 0.25), light ? 0.75 : 0.6);
+    g.strokeStyle = rgba(light ? mix(rgb, BLACK, 0.5) : mix(rgb, WHITE, 0.25), light ? 0.9 : 0.6);
     g.stroke();
     return c;
   }
@@ -462,6 +475,7 @@
       this.builtSkin = this.skin;
       for (const k of Object.keys(COLORS)) {
         this.tiles[k] = makeTile(COLORS[k], size, this.skin);
+        if (light) outlineTile(this.tiles[k], COLORS[k], size);
         this.ghosts[k] = makeGhost(COLORS[k], size, light);
         this.glows[k] = makeGlow(COLORS[k], size);
       }
@@ -475,8 +489,8 @@
 
   const MAX_PARTICLES = 700;
   const CLEAR_MS = 280;
-  const COLLAPSE_DELAY = 50;
-  const COLLAPSE_MS = 170;
+  const COLLAPSE_DELAY = 30;
+  const COLLAPSE_MS = 140;
 
   class BoardRenderer {
     constructor(canvas) {
@@ -701,17 +715,23 @@
       const p = game.active;
       if (p) {
         const cells = SHAPES[p.type][p.rot];
+        const bottom = Math.max(...cells.map((q) => q[1]));
+        // While rows are still settling, whatever rests on the stack moves
+        // with the stack, so the ghost never shows inside it.
+        const restOffset = (py) => (this.collapse ? this.rowOffset(Math.min(ROWS - 1, py + bottom + 1), now) : 0);
         if (opts.ghost) {
           const gy = game.ghostY();
           if (gy !== p.y) {
             g.globalAlpha = 1;
+            const go = restOffset(gy);
             for (const [cx, cy] of cells) {
               const y = gy + cy;
               if (y < FIRST_ROW) continue;
-              g.drawImage(sprites.ghosts[p.type], (p.x + cx) * c, (y - FIRST_ROW) * c, c, c);
+              g.drawImage(sprites.ghosts[p.type], (p.x + cx) * c, (y - FIRST_ROW - go) * c, c, c);
             }
           }
         }
+        const po = game.isGrounded() ? restOffset(p.y) : 0;
         this.drawTrails(g, now);
         // Fade slightly while the lock delay runs out.
         let alpha = 1;
@@ -721,13 +741,13 @@
         for (const [cx, cy] of cells) {
           const y = p.y + cy;
           if (y < FIRST_ROW) continue;
-          g.drawImage(glow, (p.x + cx - 1) * c, (y - FIRST_ROW - 1) * c, c * 3, c * 3);
+          g.drawImage(glow, (p.x + cx - 1) * c, (y - FIRST_ROW - 1 - po) * c, c * 3, c * 3);
         }
         g.globalAlpha = alpha;
         for (const [cx, cy] of cells) {
           const y = p.y + cy;
           if (y < FIRST_ROW) continue;
-          g.drawImage(sprites.tiles[p.type], (p.x + cx) * c, (y - FIRST_ROW) * c, c, c);
+          g.drawImage(sprites.tiles[p.type], (p.x + cx) * c, (y - FIRST_ROW - po) * c, c, c);
         }
         g.globalAlpha = 1;
       } else {

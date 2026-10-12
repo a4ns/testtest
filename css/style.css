@@ -611,7 +611,9 @@ button {
 
 /* While paused the stack and previews are veiled, so a pause can't be used to plan. */
 .game.is-paused .panel-hold canvas,
-.game.is-paused .panel-next canvas {
+.game.is-paused .panel-next canvas,
+.game.is-resuming .panel-hold canvas,
+.game.is-resuming .panel-next canvas {
   filter: blur(5px) saturate(0.7);
   opacity: 0.45;
   transition: filter 0.3s, opacity 0.3s;
@@ -2973,8 +2975,7 @@ button.unlock-chip.is-action svg {
 
 /* Landscape phones: while paused the sheet takes the stage; the side panels
    (veiled anyway) step back instead of peeking out from behind it. */
-.game.short.is-paused .panel,
-.game.short.is-paused .board-shell {
+.game.short.is-paused .panel {
   opacity: 0;
   transition: opacity 0.25s var(--ease);
 }
@@ -3128,4 +3129,102 @@ button.unlock-chip.is-action svg {
   color: var(--ink);
   background: color-mix(in srgb, #64d2ff 28%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #64d2ff 55%, transparent);
+}
+
+/* ------------------------------------------------ loop 6: tiers & locks */
+
+.player {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--tier, transparent) 55%, transparent),
+    0 0 18px -6px color-mix(in srgb, var(--tier, transparent) 70%, transparent);
+}
+
+.res-levelup-ring {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tier, #64d2ff) 80%, white), color-mix(in srgb, var(--tier, #bf5af2) 70%, #5b2bd6));
+}
+
+.swatch.is-locked {
+  cursor: default;
+}
+
+.swatch.is-locked i {
+  filter: saturate(0.35) brightness(0.8);
+  opacity: 0.6;
+}
+
+/* Mode cards in one row line up: content from the top, footer at the bottom. */
+.mode-card {
+  align-content: start;
+}
+
+.mode-card .mode-best {
+  align-self: end;
+}
+
+/* A scrollable segmented control fades at the edge that has more. */
+.segmented[data-seg="recordsMode"] {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
+
+.segmented[data-seg="recordsMode"].at-end {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Results: Play again stays reachable however long the card gets. */
+.res-actions {
+  position: sticky;
+  bottom: -24px;
+  z-index: 2;
+  margin-inline: -24px;
+  margin-bottom: -24px;
+  padding: 14px 24px 24px;
+  border-radius: 0 0 40px 40px;
+  background: linear-gradient(180deg, transparent, var(--sheet-floor, rgba(10, 12, 36, 0.72)) 38%);
+}
+
+:root[data-scheme="light"] .res-actions {
+  --sheet-floor: rgba(244, 246, 255, 0.86);
+}
+
+@media (max-width: 520px) {
+  .res-actions {
+    bottom: -20px;
+    margin-inline: -18px;
+    margin-bottom: -20px;
+    padding: 12px 18px 20px;
+    border-radius: 0 0 32px 32px;
+  }
+}
+
+/* Wide but short screens (laptops): the whole menu stays in view. */
+@media (min-width: 900px) and (max-height: 860px) and (min-height: 521px) {
+  .menu {
+    gap: 12px;
+  }
+
+  .mode-card {
+    padding: 14px 16px;
+  }
+
+  .mode-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .mode-best {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  .daily-week {
+    margin-top: 6px;
+  }
+
+  .menu-hint {
+    display: none;
+  }
 }

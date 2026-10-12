@@ -43,6 +43,23 @@
       blobs: ['#6f9bff', '#ff8fcf', '#7fe9ff', '#ffc96b', '#a98bff'],
       ink: '#3a4a8a',
     },
+    // Unlocked with player level.
+    nebula: {
+      name: 'Nebula',
+      level: 7,
+      light: false,
+      base: ['#05040f', '#12061f'],
+      blobs: ['#7b2bff', '#00d2c4', '#ffb000', '#ff3d8b', '#2b6bff'],
+      ink: '#ffffff',
+    },
+    blossom: {
+      name: 'Blossom',
+      level: 14,
+      light: true,
+      base: ['#fbe7ef', '#e9f6f1'],
+      blobs: ['#ff9ac1', '#ffc9a3', '#8fe3c8', '#c7a6ff', '#ffd9e8'],
+      ink: '#6a3a5a',
+    },
   };
 
   const SHAPES = [

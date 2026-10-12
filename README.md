@@ -12,7 +12,7 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 ## Play
 
 - **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; earn Bronze, Silver and Gold medals and bonus XP, and build a streak (every 7 days banks a freeze that covers one missed day).
-- **Marathon** — endless; gravity speeds up every 10 lines (guideline curve up to level 20). Save & quit any time and continue later.
+- **Marathon** — gravity speeds up every 10 lines (guideline curve, true 20G at the top); finish at 150 lines or keep going. Save & quit any time and continue later.
 - **Sprint 40L** — clear 40 lines as fast as you can, with your pace against your best at 10, 20 and 30 lines.
 - **Ultra 2:00** — score as much as you can in two minutes.
 - **Dig** — race through ten rows of messy garbage to the floor.
@@ -51,8 +51,9 @@ Y 180°, bumpers hold, Start pause).
 - **Sound:** all effects and both soundtracks (the ambient *Glass Garden* and a
   glassy *Korobeiniki*) are synthesized live with the Web Audio API. Combos
   climb a pentatonic scale; the music speeds up with the level.
-- **Progression:** player levels and XP, seven block materials unlocked along the
-  way (Jelly, Crystal, Neon, Pearl, Gilded, Bubble, Prism), personal top-10 per mode,
+- **Progression:** player levels and XP with glass tiers far past level 20, seven
+  block materials (Jelly, Crystal, Neon, Pearl, Gilded, Bubble, Prism) and two
+  wallpapers unlocked along the way, personal top-10 per mode,
   23 achievements with progress, daily medals and streaks, lifetime stats, resumable
   Marathon/Zen runs, Sprint live pace vs your best, a NEW BEST moment the instant you
   pass your record, one-key instant retry (R), shareable results.

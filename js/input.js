@@ -149,8 +149,12 @@
       if (!game) {
         // Charge DAS during the countdown so a held direction fires at GO.
         if (this.dir && this.charging()) this.das = Math.min(this.das + dt, this.settings.das);
+        this.hadGame = false;
         return;
       }
+      // A direction charged through READY shifts on the very first frame.
+      if (!this.hadGame && this.dir && this.das >= this.settings.das) this.rep = Math.max(this.rep, this.settings.arr);
+      this.hadGame = true;
       if (!this.dir) return;
       const das = this.settings.das;
       const arr = this.settings.arr;
@@ -341,12 +345,17 @@
         const fdx = e.clientX - r.x;
         const fdy = e.clientY - r.y;
         const vy = fdy / span;
+        // A flick is a burst: on a long gesture it has to be clearly faster
+        // than the drag before it, so lifting out of a quick soft drop
+        // doesn't hard-drop.
+        const avgDown = Math.max(0, dy) / Math.max(16, dt);
+        const flickDown = dt < 260 ? vy > 0.6 : vy > Math.max(0.9, avgDown * 1.8);
         if (t.second) {
           if (!t.moved && dt < 450) game.rotate(2);
         } else if (!t.moved && Math.hypot(dx, dy) < 16 && dt < 380) {
           const rect = el.getBoundingClientRect();
           game.rotate(e.clientX < rect.left + rect.width / 2 ? -1 : 1);
-        } else if (fdy > 28 && vy > 0.6 && fdy > Math.abs(fdx) * 1.1) {
+        } else if (fdy > 28 && flickDown && fdy > Math.abs(fdx) * 1.1) {
           game.hardDrop();
         } else if (fdy < -28 && vy < -0.45 && -fdy > Math.abs(fdx) * 1.2) {
           game.hold();

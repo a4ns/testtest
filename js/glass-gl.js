@@ -138,18 +138,20 @@ void main() {
     vec3 sm = textureLod(uBg, vec2((c.x + o.x) / uRes.x, 1.0 - (c.y + o.y) / uRes.y), 4.5).rgb;
     lum = max(lum, dot(sm, vec3(0.2126, 0.7152, 0.0722)));
   }
-  vec3 dimColor = uLight > 0.5 ? vec3(1.0) : vec3(0.03, 0.04, 0.13);
-  float dimAmt;
+  // The rim band is spared some dimming so its refraction stays visible.
+  float spare = 1.0 - 0.55 * lens;
   if (uLight > 0.5) {
-    // Dark text: lift the backdrop until it is at least this bright.
+    // Dark text: lift the backdrop toward white until it is bright enough.
     float need = clamp((0.5 - lum) / max(1.0 - lum, 0.05), 0.0, 1.0);
-    dimAmt = max(uDim * mix(1.4, 0.8, smoothstep(0.45, 0.9, lum)), need * uText);
+    float dimAmt = max(uDim * mix(1.4, 0.8, smoothstep(0.45, 0.9, lum)), need * uText);
+    col = mix(col, vec3(1.0), clamp(dimAmt * spare, 0.0, 0.94));
   } else {
-    // White text: deepen the backdrop until it is at most this bright.
-    float need = clamp((lum - 0.14) / max(lum - 0.035, 0.05), 0.0, 1.0);
-    dimAmt = max(uDim * mix(0.75, 1.5, smoothstep(0.12, 0.55, lum)), need * uText);
+    // White text: darken the backdrop (keeping its hue, like smoked glass of
+    // the same colour) until it is dark enough.
+    float need = clamp((1.0 - 0.14 / max(lum, 0.14)) / 0.9, 0.0, 1.0);
+    float dimAmt = clamp(max(uDim * mix(0.75, 1.5, smoothstep(0.12, 0.55, lum)), need * uText) * spare, 0.0, 0.94);
+    col = col * (1.0 - 0.9 * dimAmt) + vec3(0.006, 0.008, 0.025) * dimAmt;
   }
-  col = mix(col, dimColor, clamp(dimAmt, 0.0, 0.94));
 
   // Let colour through: a touch more saturation inside the slab.
   float cl = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -187,7 +189,7 @@ void main() {
   // stack to read; text surfaces lean on adaptive dimming instead of frost.
   const MATERIALS = {
     // text: how strongly the slab guarantees contrast for the text it carries.
-    board: { lod: 3.7, refract: 24, band: 30, mag: 0.012, text: 0.6, dim: [0.46, 0.2], tint: [0.04, 0.2], shadow: [0.34, 0.14] },
+    board: { lod: 3.7, refract: 24, band: 30, mag: 0.012, text: 0.6, dim: [0.46, 0.08], tint: [0.04, 0.07], shadow: [0.34, 0.14] },
     panel: { lod: 2.5, refract: 22, band: 24, mag: 0.02, text: 1, dim: [0.36, 0.14], tint: [0.07, 0.18], shadow: [0.3, 0.14] },
     card: { lod: 1.8, refract: 30, band: 30, mag: 0.03, text: 1, dim: [0.3, 0.1], tint: [0.08, 0.16], shadow: [0.28, 0.14] },
     control: { lod: 1.0, refract: 18, band: 20, mag: 0.04, text: 1, dim: [0.16, 0.06], tint: [0.12, 0.26], shadow: [0.22, 0.12] },

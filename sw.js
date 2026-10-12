@@ -1,5 +1,5 @@
 /* Offline support: network first (always fresh when online), cache fallback. */
-const CACHE = 'lgtetris-v5';
+const CACHE = 'lgtetris-v6';
 const ASSETS = [
   './',
   'index.html',

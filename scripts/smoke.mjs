@@ -58,6 +58,12 @@ try {
 
     await page.click('.mode-card[data-mode="marathon"]');
     await sleep(700);
+    // A brand-new keyboard player sees the controls hint through READY.
+    const hint = await page.evaluate(() => {
+      const h = document.getElementById('keys-hint');
+      return !h.hidden && !h.classList.contains('is-leaving') && h.textContent.length > 0;
+    });
+    if (!hint) problems.push('keys hint not shown to a new player');
     await shot(page, '02-countdown');
     await sleep(1400);
     // Play a few pieces.
@@ -187,14 +193,15 @@ try {
     // Daily challenge: same first pieces on two starts.
     await page.click('.mode-card[data-mode="daily"]');
     await sleep(500);
-    const q1 = await page.evaluate(() => window.__tetris.app.game.queue.join(''));
+    // Compare seeds (the live queue moves as soon as play starts).
+    const q1 = await page.evaluate(() => window.__tetris.app.game.seed);
     await sleep(1400);
     await shot(page, '16-daily');
     await page.keyboard.press('Escape');
     await sleep(400);
     await page.keyboard.press('KeyR');
     await sleep(200);
-    const q2 = await page.evaluate(() => window.__tetris.app.game.queue.join(''));
+    const q2 = await page.evaluate(() => window.__tetris.app.game.seed);
     if (q1 !== q2) problems.push('daily queue differs between attempts');
     await sleep(900);
     await page.evaluate(() => {
@@ -389,14 +396,15 @@ try {
         ev('pointermove', x, y);
       }
       await wait(20);
-      ev('pointermove', x + 2, y + 30);
+      ev('pointermove', x + 2, y + 40);
       await wait(16);
-      ev('pointermove', x + 3, y + 70);
+      ev('pointermove', x + 3, y + 100);
       await wait(16);
-      ev('pointerup', x + 3, y + 90);
+      ev('pointerup', x + 3, y + 140);
       await wait(50);
       const dropped = g.stats.pieces - before;
-      // Two-finger tap -> 180.
+      // Two-finger tap -> 180 (on a T: an O can't rotate).
+      g.active = { type: 'T', rot: 0, x: 3, y: 22 };
       const rot0 = g.active.rot;
       const cx = r.left + r.width / 2;
       ev('pointerdown', cx - 30, y, 5);
