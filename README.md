@@ -11,10 +11,11 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 
 ## Play
 
-- **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; earn Bronze, Silver and Gold medals and build a streak.
+- **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; earn Bronze, Silver and Gold medals and bonus XP, and build a streak (every 7 days banks a freeze that covers one missed day).
 - **Marathon** — endless; gravity speeds up every 10 lines (guideline curve up to level 20). Save & quit any time and continue later.
 - **Sprint 40L** — clear 40 lines as fast as you can, with your pace against your best at 10, 20 and 30 lines.
 - **Ultra 2:00** — score as much as you can in two minutes.
+- **Dig** — race through ten rows of messy garbage to the floor.
 - **Zen** — no game over; when the stack tops out it shatters and you keep going.
 
 | Action | Keys (remappable) |
@@ -27,7 +28,7 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 | Rotate 180° | A |
 | Hold | C, Shift |
 | Pause | Esc, P |
-| Restart (Sprint/Ultra, pause, results) | R |
+| Restart (asks first if a saved run would be lost) | R |
 
 **Touch:** drag sideways to move, tap the right/left half to rotate, tap with two
 fingers to rotate 180°, drag down to soft drop, flick down to hard drop, flick up
@@ -43,7 +44,8 @@ Y 180°, bumpers hold, Start pause).
   full, TST kick upgrade), back-to-back ×1.5, combos, perfect-clear bonuses,
   block-out and lock-out top-outs.
 - **Handling settings:** DAS, ARR (down to instant) and soft-drop speed
-  (up to instant), with DAS carried between pieces.
+  (up to instant), with DAS carried between pieces, initial rotation/hold
+  (IRS/IHS) and true 20G at the top levels.
 - **Zero-delay line clears:** the logic clears instantly; the shatter, light
   sweep and springy collapse are purely visual, so fast play never waits.
 - **Sound:** all effects and both soundtracks (the ambient *Glass Garden* and a

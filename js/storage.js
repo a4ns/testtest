@@ -11,6 +11,7 @@
     records: 'lgtetris.records.v1',
     profile: 'lgtetris.profile.v1',
     daily: 'lgtetris.daily.v1',
+    recent: 'lgtetris.recent.v1',
     save: 'lgtetris.save.v1.', // + mode
   };
 
@@ -82,7 +83,8 @@
   /** Experience earned from everything you've done, ever. */
   function playerXP(p) {
     const ach = p && p.achievements ? Object.keys(p.achievements).length : 0;
-    return Math.round(p.lines * 10 + p.tetrises * 40 + p.tspins * 60 + p.perfectClears * 300 + p.games * 20 + ach * 250);
+    const bonus = p && typeof p.bonusXP === 'number' && isFinite(p.bonusXP) ? Math.max(0, p.bonusXP) : 0;
+    return Math.round(p.lines * 10 + p.tetrises * 40 + p.tspins * 60 + p.perfectClears * 300 + p.games * 20 + ach * 250 + bonus);
   }
 
   /** Level n is reached at 250·n·(n−1) XP: 0, 500, 1500, 3000, 5000… */
@@ -142,6 +144,8 @@
     { id: 'daily', name: 'Daily Ritual', desc: 'Finish a Daily Challenge.' },
     { id: 'streak3', name: 'Habit', desc: 'Play the Daily Challenge 3 days in a row.' },
     { id: 'streak7', name: 'Devotion', desc: 'Play the Daily Challenge 7 days in a row.' },
+    { id: 'streak30', name: 'Ritual', desc: 'Keep a 30-day Daily Challenge streak.' },
+    { id: 'gold', name: 'Gold Standard', desc: 'Win a Gold medal in the Daily Challenge.' },
   ];
 
   function load(key) {
@@ -311,6 +315,8 @@
       achievements: {},
       seenTouchHelp: false,
       motionGranted: false,
+      // Daily Challenge rewards: first finish of the day, medals, streak.
+      bonusXP: 0,
     };
     if (isPlainObject(saved)) {
       for (const k of Object.keys(p)) {
@@ -368,8 +374,10 @@
 
   function loadDaily() {
     const v = load(KEYS.daily);
-    const out = { days: {}, streak: 0, lastDay: '' };
+    const out = { days: {}, streak: 0, lastDay: '', freezes: 0, frozeOn: '' };
     if (isPlainObject(v)) {
+      if (finite(v.freezes)) out.freezes = Math.min(MAX_FREEZES, Math.floor(v.freezes));
+      if (typeof v.frozeOn === 'string') out.frozeOn = v.frozeOn;
       if (isPlainObject(v.days)) {
         for (const k of Object.keys(v.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && finite(v.days[k])) out.days[k] = v.days[k];
       }
@@ -379,12 +387,26 @@
     return out;
   }
 
+  // A streak freeze is earned every 7 days of streak (up to 2 banked) and
+  // covers a single missed day automatically.
+  const MAX_FREEZES = 2;
+
   /** Records a finished daily run; returns the updated daily state. */
   function recordDaily(daily, key, score) {
     daily.days[key] = Math.max(daily.days[key] || 0, score);
     if (daily.lastDay !== key) {
-      daily.streak = daily.lastDay === previousDay(key) ? daily.streak + 1 : 1;
+      const yesterday = previousDay(key);
+      if (daily.lastDay === yesterday) {
+        daily.streak += 1;
+      } else if (daily.lastDay === previousDay(yesterday) && daily.freezes > 0) {
+        daily.freezes -= 1;
+        daily.frozeOn = yesterday;
+        daily.streak += 1;
+      } else {
+        daily.streak = 1;
+      }
       daily.lastDay = key;
+      if (daily.streak % 7 === 0) daily.freezes = Math.min(MAX_FREEZES, (daily.freezes || 0) + 1);
     }
     // Keep the file small: only the last 60 days.
     const keys = Object.keys(daily.days).sort();
@@ -393,9 +415,33 @@
     return daily;
   }
 
-  /** The streak still counts if the last daily was today or yesterday. */
+  /** The streak still counts if the last daily was today or yesterday, or
+   * the day before with a freeze banked to cover the gap. */
   function liveStreak(daily, today) {
-    return daily.lastDay === today || daily.lastDay === previousDay(today) ? daily.streak : 0;
+    const yesterday = previousDay(today);
+    if (daily.lastDay === today || daily.lastDay === yesterday) return daily.streak;
+    if (daily.freezes > 0 && daily.lastDay === previousDay(yesterday)) return daily.streak;
+    return 0;
+  }
+
+  // ---- recent results (for "vs your recent average") -------------------
+
+  function loadRecent() {
+    const v = load(KEYS.recent);
+    const out = {};
+    if (isPlainObject(v)) {
+      for (const m of MODE_ORDER) if (Array.isArray(v[m])) out[m] = v[m].filter(finite).slice(-20);
+    }
+    return out;
+  }
+
+  function pushRecent(recent, mode, value) {
+    if (!finite(value)) return recent;
+    const list = recent[mode] || (recent[mode] = []);
+    list.push(value);
+    while (list.length > 20) list.shift();
+    save(KEYS.recent, recent);
+    return recent;
   }
 
   root.TetrisStorage = {
@@ -431,5 +477,8 @@
     loadDaily,
     recordDaily,
     liveStreak,
+    loadRecent,
+    pushRecent,
+    MAX_FREEZES,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

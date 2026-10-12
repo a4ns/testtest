@@ -27,6 +27,10 @@
   const records = S.loadRecords();
   const profile = S.loadProfile();
   let daily = S.loadDaily();
+  let recent = S.loadRecent();
+  // XP for the Daily Challenge, on top of what play itself earns.
+  const DAILY_XP = { first: 150, perStreakDay: 10, maxStreakBonus: 100, medal: { bronze: 50, silver: 100, gold: 200 } };
+  const STREAK_MILESTONES = [7, 14, 30, 50, 100, 200, 365];
 
   const MODE_INFO = {
     marathon: { name: 'Marathon', tint: '#64d2ff' },
@@ -713,6 +717,13 @@
       sEl.innerHTML = '<svg aria-hidden="true"><use href="#i-flame"/></svg>';
       // A streak that today's run hasn't extended yet says so.
       sEl.appendChild(document.createTextNode(streak + '-day streak' + (playedToday ? '' : ' · play today to keep it')));
+      if (daily.freezes > 0) {
+        const fz = document.createElement('span');
+        fz.className = 'freeze';
+        fz.textContent = daily.freezes + ' freeze' + (daily.freezes > 1 ? 's' : '');
+        fz.title = 'A freeze covers one missed day automatically. Earn one every 7 days of streak.';
+        sEl.appendChild(fz);
+      }
       label.appendChild(sEl);
     } else {
       label.textContent = medal.next ? fmtInt(medal.next.score) + ' for ' + medal.next.name : 'Today’s best';
@@ -1194,11 +1205,35 @@
     const eligible = isRace(g.mode) ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
     const rank = eligible ? S.addRecord(records, g.mode, run) : 0;
     if (SAVE_MODES.indexOf(g.mode) !== -1) S.clearSave(g.mode);
-    if (g.mode === 'daily' && ev.result !== 'ended') daily = S.recordDaily(S.loadDaily(), run.day, g.score);
+    app.dailyReward = null;
+    if (g.mode === 'daily' && ev.result !== 'ended') {
+      const before = S.loadDaily();
+      const prevDayBest = before.days[run.day];
+      daily = S.recordDaily(before, run.day, g.score);
+      const first = prevDayBest == null;
+      const medalXP = (m) => (m ? DAILY_XP.medal[m.id] : 0);
+      const oldMedal = prevDayBest == null ? null : S.dailyMedal(prevDayBest).got;
+      const newMedal = S.dailyMedal(daily.days[run.day]).got;
+      let bonus = Math.max(0, medalXP(newMedal) - medalXP(oldMedal));
+      if (first) bonus += DAILY_XP.first + Math.min(DAILY_XP.maxStreakBonus, DAILY_XP.perStreakDay * daily.streak);
+      profile.bonusXP = num(profile.bonusXP) + bonus;
+      app.dailyReward = {
+        first,
+        bonus,
+        medalUp: newMedal && newMedal !== oldMedal ? newMedal : null,
+        milestone: first && STREAK_MILESTONES.indexOf(daily.streak) !== -1 ? daily.streak : 0,
+        froze: first && daily.frozeOn === S.previousDay(run.day),
+        freezeEarned: first && daily.streak % 7 === 0 && daily.freezes > 0,
+      };
+    }
+    // Recent results, for "vs your recent average".
+    const recentList = (recent[g.mode] || []).slice(-10);
+    const recentAvg = recentList.length >= 3 ? recentList.reduce((a, b) => a + b, 0) / recentList.length : null;
+    if (eligible && ev.result !== 'ended') recent = S.pushRecent(recent, g.mode, isRace(g.mode) ? run.time : run.score);
 
     addLifetime(Object.assign(gameTotals(g), { finished: ev.result === 'cleared' || ev.result === 'timeup' }));
     checkAchievements(true, ev);
-    return { run, rank, prevBest, result: ev.result, eligible, xpBefore, xpAfter: S.playerXP(profile) };
+    return { run, rank, prevBest, result: ev.result, eligible, recentAvg, xpBefore, xpAfter: S.playerXP(profile) };
   }
 
   function showResults() {
@@ -1247,7 +1282,7 @@
       if (isRace(mode) && info.prevBest) text += ' · −' + ((info.prevBest.time - info.run.time) / 1000).toFixed(2) + 's';
       b.appendChild(document.createTextNode(text));
       slot.appendChild(b);
-    } else if (info.rank > 1) {
+    } else if (info.rank > 1 && (info.rank <= 3 || (records[mode] || []).length >= 10)) {
       const b = document.createElement('span');
       b.className = 'eyebrow';
       b.style.display = 'block';
@@ -1264,17 +1299,29 @@
       slot.appendChild(el);
       return el;
     };
-    // How this run compares with the best (when it isn't the best).
-    if (info.rank !== 1 && info.prevBest && !isRace(mode) && info.result !== 'ended') {
-      const pct = info.prevBest.score > 0 ? Math.round((g.score / info.prevBest.score) * 100) : 0;
-      line('Best ' + fmtInt(info.prevBest.score) + ' · this run ' + pct + '%');
+    // How this run compares with your form lately (not just your one best).
+    if (info.recentAvg != null && info.eligible && info.result !== 'ended') {
+      if (isRace(mode)) {
+        const d = (info.run.time - info.recentAvg) / 1000;
+        line((d <= 0 ? '−' : '+') + Math.abs(d).toFixed(2) + 's vs your recent average', d <= 0 ? 'is-up' : '');
+      } else {
+        const d = g.score - info.recentAvg;
+        line(fmtInt(Math.abs(d)) + (d >= 0 ? ' above' : ' below') + ' your recent average of ' + fmtInt(info.recentAvg), d >= 0 ? 'is-up' : '');
+      }
+    } else if (info.rank !== 1 && info.prevBest && !isRace(mode) && info.result !== 'ended') {
+      line(fmtInt(info.prevBest.score - g.score) + ' to beat your best of ' + fmtInt(info.prevBest.score));
     }
     if (mode === 'daily' && info.result !== 'ended') {
       const dayBest = daily.days[info.run.day] || g.score;
       const medal = S.dailyMedal(dayBest);
-      if (medal.got) line(medal.got.name + ' medal today' + (medal.next ? ' · ' + fmtInt(medal.next.score - dayBest) + ' to ' + medal.next.name : ''), 'medal medal-' + medal.got.id);
+      const rw = app.dailyReward;
+      if (medal.got) line(medal.got.name + ' medal' + (rw && rw.medalUp ? ' won' : ' today') + (medal.next ? ' · ' + fmtInt(medal.next.score - dayBest) + ' to ' + medal.next.name : ''), 'medal medal-' + medal.got.id);
       else if (medal.next) line(fmtInt(medal.next.score - dayBest) + ' more for ' + medal.next.name, 'medal');
-      line(daily.streak > 1 ? daily.streak + '-day streak · new pieces tomorrow' : 'New pieces tomorrow');
+      if (rw && rw.bonus) line('+' + fmtInt(rw.bonus) + ' XP daily bonus' + (rw.first && daily.streak > 1 ? ' (streak ×' + Math.min(10, daily.streak) + ')' : ''), 'is-up');
+      if (rw && rw.milestone) line(rw.milestone + '-day streak! Keep it alive tomorrow.', 'milestone');
+      else line(daily.streak > 1 ? daily.streak + '-day streak · new pieces tomorrow' : 'New pieces tomorrow');
+      if (rw && rw.froze) line('A streak freeze covered the day you missed.');
+      else if (rw && rw.freezeEarned) line('Streak freeze earned: one missed day won’t break your streak.');
     }
 
     const secs = g.time / 1000;
@@ -1314,12 +1361,17 @@
     const after = S.levelInfo(info.xpAfter);
     const gain = info.xpAfter - info.xpBefore;
     let extra = 0;
+    const lvUp = $('#res-levelup');
+    lvUp.hidden = after.level <= before.level;
     if (after.level > before.level) {
-      const chip = document.createElement('span');
-      chip.className = 'unlock-chip';
-      chip.innerHTML = '<svg aria-hidden="true"><use href="#i-star"/></svg>';
-      chip.appendChild(document.createTextNode('Level ' + after.level + '!'));
-      unlocks.appendChild(chip);
+      // A moment of its own: the new level, big, before anything else.
+      $('#res-levelup-num').textContent = String(after.level);
+      const opened = S.SKINS.filter((k) => k.level > before.level && k.level <= after.level).map((k) => k.name);
+      $('#res-levelup-sub').textContent = opened.length ? opened.join(' and ') + ' blocks unlocked' : 'Player level up';
+      lvUp.classList.remove('is-in');
+      void lvUp.offsetWidth;
+      lvUp.classList.add('is-in');
+      setTimeout(() => Audio.play('levelUp'), 380);
       extra++;
       for (const skin of S.SKINS) {
         if (skin.level > before.level && skin.level <= after.level) {
@@ -1344,13 +1396,13 @@
         }
       }
     }
-    unlocks.hidden = !app.runUnlocks.length && !extra;
+    unlocks.hidden = !unlocks.children.length;
     if (app.runUnlocks.length || extra) setTimeout(() => Audio.play('achievement'), 450);
     $('#res-xp-level').textContent = 'Player level ' + after.level;
     const nextSkin = S.SKINS.find((k) => k.level > after.level);
-    $('#res-next').textContent = nextSkin
-      ? fmtInt(250 * nextSkin.level * (nextSkin.level - 1) - info.xpAfter) + ' XP to ' + nextSkin.name + ' blocks (level ' + nextSkin.level + ')'
-      : fmtInt(after.next - info.xpAfter) + ' XP to level ' + (after.level + 1);
+    const toLevel = fmtInt(after.next - info.xpAfter) + ' XP to level ' + (after.level + 1);
+    $('#res-next').textContent =
+      nextSkin && nextSkin.level > after.level + 1 ? toLevel + ' · ' + nextSkin.name + ' blocks at level ' + nextSkin.level : nextSkin ? toLevel + ' and ' + nextSkin.name + ' blocks' : toLevel;
     $('#res-xp-gain').textContent = '+' + fmtInt(gain) + ' XP';
     const fill = $('#res-xp-fill');
     fill.style.transition = 'none';
@@ -1663,6 +1715,8 @@
         u('daily');
         if (daily.streak >= 3) u('streak3');
         if (daily.streak >= 7) u('streak7');
+        if (daily.streak >= 30) u('streak30');
+        if (S.dailyMedal(daily.days[app.dailyKey || S.dayKey()] || 0).got === S.DAILY_MEDALS[2]) u('gold');
       }
     }
     if (got.length) {

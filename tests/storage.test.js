@@ -177,3 +177,36 @@ test('daily medals', () => {
   assert.equal(S.dailyMedal(12000).next.id, 'gold');
   assert.equal(S.dailyMedal(99999).next, null);
 });
+
+test('a banked streak freeze covers one missed day', () => {
+  mem.clear();
+  let d = S.loadDaily();
+  // Seven days in a row earns a freeze.
+  const days = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07'];
+  for (const k of days) d = S.recordDaily(d, k, 1000);
+  assert.equal(d.streak, 7);
+  assert.equal(d.freezes, 1);
+  // Missing the 8th: still alive on the 9th, and playing then uses the freeze.
+  assert.equal(S.liveStreak(d, '2026-10-09'), 7);
+  d = S.recordDaily(d, '2026-10-09', 1000);
+  assert.equal(d.streak, 8);
+  assert.equal(d.freezes, 0);
+  assert.equal(d.frozeOn, '2026-10-08');
+  // A second gap with no freeze resets it.
+  assert.equal(S.liveStreak(d, '2026-10-11'), 0);
+  d = S.recordDaily(d, '2026-10-11', 1000);
+  assert.equal(d.streak, 1);
+});
+
+test('recent results keep the last twenty per mode', () => {
+  mem.clear();
+  let r = S.loadRecent();
+  for (let i = 0; i < 25; i++) r = S.pushRecent(r, 'ultra', i);
+  assert.equal(S.loadRecent().ultra.length, 20);
+  assert.equal(S.loadRecent().ultra[0], 5);
+});
+
+test('daily bonus XP counts toward the player level', () => {
+  const p = { lines: 0, tetrises: 0, tspins: 0, perfectClears: 0, games: 0, achievements: {}, bonusXP: 350 };
+  assert.equal(S.playerXP(p), 350);
+});
