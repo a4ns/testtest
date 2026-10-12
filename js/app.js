@@ -33,6 +33,7 @@
     sprint: { name: 'Sprint 40L', tint: '#ff9f0a' },
     ultra: { name: 'Ultra 2:00', tint: '#bf5af2' },
     zen: { name: 'Zen', tint: '#30d158' },
+    dig: { name: 'Dig', tint: '#c69c6d' },
     daily: { name: 'Daily', tint: '#ffb340' },
   };
   // Modes whose runs are saved so they can be continued later.
@@ -135,6 +136,7 @@
       menuSelect: () => {
         const el = document.activeElement;
         if (el && el !== document.body && el.click) el.click();
+        else if (app.screen === 'menu' && !app.modal) spatialNav('down');
         else focusFirst();
       },
       menuBack: () => back(),
@@ -150,6 +152,7 @@
   // ---------------------------------------------------------------- utils
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const isRace = (m) => S.RACE_MODES.indexOf(m) !== -1;
   const nf = new Intl.NumberFormat('en-US');
   const fmtInt = (n) => nf.format(Math.round(n));
   function fmtTime(ms, cs) {
@@ -389,115 +392,128 @@
   }
 
   // Liquid Glass surfaces grow out of the control that summoned them and
-  // melt back into it. A clipping window (rounded, never squashed) travels
-  // from the control to the sheet's place while widening to the full sheet.
-  const morphTokens = new WeakMap();
-  const MORPH_EASE = 'cubic-bezier(0.2, 0.9, 0.25, 1)';
-  const MORPH_SPRING = 'cubic-bezier(0.22, 1.18, 0.36, 1)';
+  // melt back into it. A blob of glass (rim and all) travels between the
+  // control's shape and the sheet's; the sheet's content only appears once
+  // the glass has nearly arrived, and leaves first on the way back.
+  const morphs = new WeakMap();
+  const MORPH_SPRING = 'cubic-bezier(0.25, 1.15, 0.4, 1)';
+  const MORPH_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
   function canMorph(sheet, origin) {
     return !!(sheet && origin && !reduceMotion() && origin.getClientRects().length && origin.getBoundingClientRect().width);
   }
 
-  /** Start/end geometry for a morph between an origin control and a sheet. */
-  function morphGeometry(sheet, origin) {
-    const to = sheet.getBoundingClientRect();
-    const from = origin.getBoundingClientRect();
-    const ix = Math.max(0, (to.width - from.width) / 2);
-    const iy = Math.max(0, (to.height - from.height) / 2);
-    const r0 = Math.min(parseFloat(getComputedStyle(origin).borderTopLeftRadius) || 0, from.width / 2, from.height / 2);
-    const R = parseFloat(getComputedStyle(sheet).borderTopLeftRadius) || 0;
-    return {
-      ok: to.width > 0 && to.height > 0,
-      move: 'translate(' + (from.left + from.width / 2 - (to.left + to.width / 2)).toFixed(1) + 'px,' + (from.top + from.height / 2 - (to.top + to.height / 2)).toFixed(1) + 'px)',
-      small: 'inset(' + iy.toFixed(1) + 'px ' + ix.toFixed(1) + 'px round ' + r0.toFixed(1) + 'px)',
-      // Slightly outside the box so the sheet's shadow isn't clipped.
-      full: 'inset(-48px round ' + (R + 48) + 'px)',
-    };
+  function radiusOf(el, rect) {
+    return Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, rect.width / 2, rect.height / 2);
   }
 
-  function clearMorph(sheet) {
-    sheet.style.transition = 'none';
-    sheet.style.transform = '';
-    sheet.style.clipPath = '';
-    sheet.style.opacity = '';
-    void sheet.offsetWidth;
+  function placeBlob(blob, r, radius) {
+    blob.style.left = r.left.toFixed(1) + 'px';
+    blob.style.top = r.top.toFixed(1) + 'px';
+    blob.style.width = r.width.toFixed(1) + 'px';
+    blob.style.height = r.height.toFixed(1) + 'px';
+    blob.style.borderRadius = radius.toFixed(1) + 'px';
+  }
+
+  /** Cancels a running morph on this sheet and tidies up after it. */
+  function endMorph(sheet) {
+    const m = morphs.get(sheet);
+    if (!m) return;
+    morphs.delete(sheet);
+    m.timers.forEach(clearTimeout);
+    if (m.blob) m.blob.remove();
     sheet.style.transition = '';
+    sheet.style.opacity = '';
   }
 
+  /** The control a sheet grows from hands its glass over while it's out. */
   const morphOrigins = new WeakMap();
-
-  /** The origin control hands its glass to the sheet (hidden while it's out). */
   function hideOrigin(sheet, origin) {
     if (!origin || origin === els.boardShell) return;
     morphOrigins.set(sheet, origin);
     origin.classList.add('is-morph-origin');
   }
 
-  function restoreOrigin(sheet, delay) {
+  function restoreOrigin(sheet) {
     const origin = morphOrigins.get(sheet);
     if (!origin) return;
     morphOrigins.delete(sheet);
-    const show = () => origin.classList.remove('is-morph-origin');
-    if (delay) setTimeout(show, delay);
-    else show();
+    origin.classList.remove('is-morph-origin');
+  }
+
+  function morphBlob(sheet) {
+    const blob = document.createElement('div');
+    blob.className = 'glass morph-blob' + (sheet.closest('.modal') ? ' is-modal' : '');
+    blob.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(blob);
+    return blob;
   }
 
   function morphOpen(screen, origin) {
     const sheet = screen.firstElementChild;
+    endMorph(sheet);
     restoreOrigin(sheet);
     if (!canMorph(sheet, origin)) return;
-    const token = {};
-    morphTokens.set(sheet, token);
-    hideOrigin(sheet, origin);
+    // Measure the sheet where it will rest (no entrance transform).
     sheet.style.transition = 'none';
     sheet.style.transform = 'none';
-    sheet.style.clipPath = 'none';
-    const geo = morphGeometry(sheet, origin);
-    if (!geo.ok) {
-      clearMorph(sheet);
+    const to = sheet.getBoundingClientRect();
+    sheet.style.transform = '';
+    const from = origin.getBoundingClientRect();
+    if (!to.width || !to.height) {
+      sheet.style.transition = '';
       return;
     }
-    sheet.style.transform = geo.move;
-    sheet.style.clipPath = geo.small;
-    sheet.style.opacity = '0.4';
-    void sheet.offsetWidth;
-    sheet.style.transition = 'transform 0.6s ' + MORPH_SPRING + ', clip-path 0.55s ' + MORPH_EASE + ', opacity 0.18s ease-out';
-    sheet.style.transform = '';
-    sheet.style.clipPath = geo.full;
-    sheet.style.opacity = '';
-    setTimeout(() => {
-      if (morphTokens.get(sheet) === token) clearMorph(sheet);
-    }, 650);
+    const m = { timers: [], blob: morphBlob(sheet) };
+    morphs.set(sheet, m);
+    hideOrigin(sheet, origin);
+    const blob = m.blob;
+    placeBlob(blob, from, radiusOf(origin, from));
+    sheet.style.opacity = '0';
+    void blob.offsetWidth;
+    blob.style.transition =
+      ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' 0.52s ' + MORPH_SPRING).join(', ') + ', opacity 0.2s ease-out';
+    placeBlob(blob, to, radiusOf(sheet, to));
+    // The sheet (content and all) settles in as the glass arrives.
+    m.timers.push(
+      setTimeout(() => {
+        sheet.style.transition = 'opacity 0.2s ease-out';
+        sheet.style.opacity = '';
+        blob.style.opacity = '0';
+      }, 300),
+      setTimeout(() => endMorph(sheet), 560)
+    );
   }
 
   function morphClose(screen, origin) {
     const sheet = screen.firstElementChild;
+    endMorph(sheet);
     if (!canMorph(sheet, origin)) {
       restoreOrigin(sheet);
       return;
     }
-    // The control reappears as the sheet lands back in it.
-    restoreOrigin(sheet, 230);
-    const token = {};
-    morphTokens.set(sheet, token);
-    const current = sheet.style.transform;
-    sheet.style.transition = 'none';
-    // The screen just lost is-open, which would snap the sheet to transparent
-    // under transition:none; hold it visible so the melt can be seen.
-    sheet.style.opacity = '1';
-    sheet.style.transform = 'none';
-    const geo = morphGeometry(sheet, origin);
-    sheet.style.transform = current;
-    if (!sheet.style.clipPath) sheet.style.clipPath = geo.full;
-    void sheet.offsetWidth;
-    sheet.style.transition = 'transform 0.34s ' + MORPH_EASE + ', clip-path 0.34s ' + MORPH_EASE + ', opacity 0.34s cubic-bezier(0.7, 0, 0.9, 0.5)';
-    sheet.style.transform = geo.move;
-    sheet.style.clipPath = geo.small;
+    const from = sheet.getBoundingClientRect();
+    const to = origin.getBoundingClientRect();
+    if (!from.width) {
+      restoreOrigin(sheet);
+      return;
+    }
+    const m = { timers: [], blob: morphBlob(sheet) };
+    morphs.set(sheet, m);
+    const blob = m.blob;
+    placeBlob(blob, from, radiusOf(sheet, from));
+    // Content leaves first; then the glass melts back into the control.
+    sheet.style.transition = 'opacity 0.1s ease-in';
     sheet.style.opacity = '0';
-    setTimeout(() => {
-      if (morphTokens.get(sheet) === token) clearMorph(sheet);
-    }, 400);
+    void blob.offsetWidth;
+    blob.style.transition =
+      ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' 0.36s ' + MORPH_EASE).join(', ') + ', opacity 0.14s ease-in 0.24s';
+    placeBlob(blob, to, radiusOf(origin, to));
+    blob.style.opacity = '0';
+    m.timers.push(
+      setTimeout(() => restoreOrigin(sheet), 260),
+      setTimeout(() => endMorph(sheet), 420)
+    );
   }
 
   function setScreen(name) {
@@ -676,7 +692,7 @@
       if (m === 'daily') continue;
       const best = S.bestRun(records, m);
       const el = $('[data-best="' + m + '"]');
-      if (el) el.textContent = best ? (m === 'sprint' ? fmtTime(best.time, true) : fmtInt(best.score)) : '—';
+      if (el) el.textContent = best ? (isRace(m) ? fmtTime(best.time, true) : fmtInt(best.score)) : '—';
     }
     // Daily card: today's date, today's best and the live streak.
     const today = S.dayKey();
@@ -766,10 +782,15 @@
     return { lines: g.lines, time: g.time, pieces: st.pieces, tetrises: st.tetrises, tspins: st.tspins + st.tspinMinis, pcs: st.perfectClears, score: g.score };
   }
 
+  /** A real attempt: a finished Sprint/Ultra/Daily/Dig, or half a minute
+   * and a few lines of play. Mashing restarts earns nothing. */
+  function realAttempt(t) {
+    return !!t.finished || (num(t.time) >= 30000 && num(t.lines) >= 4);
+  }
+
   function addLifetime(t) {
     if (!t || (!t.pieces && !t.time)) return;
-    // Only a real attempt counts as a game (instant retries don't farm XP).
-    if (hasProgress(t.pieces)) profile.games += 1;
+    if (realAttempt(t)) profile.games += 1;
     profile.lines += num(t.lines);
     profile.pieces += num(t.pieces);
     profile.tetrises += num(t.tetrises);
@@ -777,6 +798,11 @@
     profile.perfectClears += num(t.pcs);
     profile.timePlayed += Math.round(num(t.time));
     profile.bestScore = Math.max(profile.bestScore, num(t.score));
+    // Lifetime milestones can be crossed in a run that's quit or saved.
+    if (profile.lines >= 1000 && !profile.achievements['lines1000']) {
+      profile.achievements['lines1000'] = Date.now();
+      toastAchievement('lines1000');
+    }
     S.saveProfile(profile);
   }
 
@@ -856,7 +882,7 @@
     Audio.ensureMusic();
     requestWakeLock();
     // The score to beat this run (Sprint has its own live pace).
-    const best = g.mode === 'daily' ? daily.days[app.dailyKey || S.dayKey()] : g.mode !== 'sprint' && S.bestRun(records, g.mode) ? S.bestRun(records, g.mode).score : 0;
+    const best = g.mode === 'daily' ? daily.days[app.dailyKey || S.dayKey()] : !isRace(g.mode) && S.bestRun(records, g.mode) ? S.bestRun(records, g.mode).score : 0;
     app.pbScore = typeof best === 'number' && best > 0 ? best : 0;
     app.pbBeaten = false;
     showKeysHint(g);
@@ -943,6 +969,7 @@
         () => {
           if (!app.game) return;
           app.game.start();
+          initialActions();
           setScreen('playing');
           flush();
         },
@@ -963,6 +990,16 @@
     }
   }
 
+  /** IHS/IRS: hold or rotate keys held through READY act on the first piece. */
+  function initialActions() {
+    const g = app.game;
+    if (!g) return;
+    if (input.isHeld('hold')) g.hold();
+    if (input.isHeld('r180')) g.rotate(2);
+    else if (input.isHeld('cw')) g.rotate(1);
+    else if (input.isHeld('ccw')) g.rotate(-1);
+  }
+
   function continueRun(mode) {
     const data = mode && S.loadSave(mode);
     const g = data && E.Game.restore(data.game, { previewCount: settings.previews, softDropFactor: softDropFactor() });
@@ -973,6 +1010,8 @@
     }
     const unlocks = Array.isArray(data.unlocks) ? data.unlocks.filter((id) => typeof id === 'string') : [];
     beginGame(g, { unlocks });
+    // Already past the record before saving: that moment has been had.
+    app.pbBeaten = !!app.pbScore && g.score > app.pbScore;
     startCountdown(400, () => {
       if (app.game === g) setScreen('playing');
     });
@@ -1107,6 +1146,7 @@
 
   function onGameEnd(ev, now) {
     const g = app.game;
+    hideKeysHint();
     input.releaseAll();
     app.screen = 'ending';
     updateInert();
@@ -1144,18 +1184,19 @@
       pieces: st.pieces,
       date: Date.now(),
     };
+    if (g.mode === 'marathon') run.climb = g.level - g.startLevel + 1;
     const prevBest = S.bestRun(records, g.mode);
     if (g.mode === 'sprint' && ev.result === 'cleared') {
       run.splits = app.splits.slice(0, 3).concat([run.time]);
       if (app.lineTimes.length >= 40) run.lineTimes = app.lineTimes.slice(0, 40);
     }
     if (g.mode === 'daily') run.day = app.dailyKey || S.dayKey();
-    const eligible = g.mode === 'sprint' ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
+    const eligible = isRace(g.mode) ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
     const rank = eligible ? S.addRecord(records, g.mode, run) : 0;
     if (SAVE_MODES.indexOf(g.mode) !== -1) S.clearSave(g.mode);
     if (g.mode === 'daily' && ev.result !== 'ended') daily = S.recordDaily(S.loadDaily(), run.day, g.score);
 
-    addLifetime(gameTotals(g));
+    addLifetime(Object.assign(gameTotals(g), { finished: ev.result === 'cleared' || ev.result === 'timeup' }));
     checkAchievements(true, ev);
     return { run, rank, prevBest, result: ev.result, eligible, xpBefore, xpAfter: S.playerXP(profile) };
   }
@@ -1171,17 +1212,20 @@
     const st = g.stats;
     $('#res-mode').textContent = MODE_INFO[mode].name + (mode === 'daily' && info.run.day ? ' · ' + prettyDay(info.run.day) : '');
     let title = 'Game Over';
-    if (info.result === 'cleared') title = 'Sprint complete';
+    if (info.result === 'cleared') title = mode === 'dig' ? 'Dug out' : 'Sprint complete';
     else if (info.result === 'timeup') title = 'Time’s up';
     else if (info.result === 'ended') title = 'Session complete';
     $('#res-title').textContent = title;
 
     let main;
     let label;
-    if (mode === 'sprint') {
+    if (isRace(mode)) {
       if (info.result === 'cleared') {
         main = fmtTime(g.time, true);
         label = 'time';
+      } else if (mode === 'dig') {
+        main = 10 - g.garbageLeft + '/10';
+        label = 'rows dug';
       } else {
         main = g.lines + '/40';
         label = 'lines';
@@ -1200,7 +1244,7 @@
       b.className = 'badge';
       b.innerHTML = '<svg width="14" height="14" aria-hidden="true"><use href="#i-star"/></svg>';
       let text = info.prevBest ? 'New personal best' : 'First record set';
-      if (mode === 'sprint' && info.prevBest) text += ' · −' + ((info.prevBest.time - info.run.time) / 1000).toFixed(2) + 's';
+      if (isRace(mode) && info.prevBest) text += ' · −' + ((info.prevBest.time - info.run.time) / 1000).toFixed(2) + 's';
       b.appendChild(document.createTextNode(text));
       slot.appendChild(b);
     } else if (info.rank > 1) {
@@ -1209,7 +1253,7 @@
       b.style.display = 'block';
       b.style.marginTop = '8px';
       let text = 'Rank #' + info.rank + ' in your top 10';
-      if (mode === 'sprint' && info.prevBest) text += ' · +' + ((info.run.time - info.prevBest.time) / 1000).toFixed(2) + 's vs best';
+      if (isRace(mode) && info.prevBest) text += ' · +' + ((info.run.time - info.prevBest.time) / 1000).toFixed(2) + 's vs best';
       b.textContent = text;
       slot.appendChild(b);
     }
@@ -1221,7 +1265,7 @@
       return el;
     };
     // How this run compares with the best (when it isn't the best).
-    if (info.rank !== 1 && info.prevBest && mode !== 'sprint' && info.result !== 'ended') {
+    if (info.rank !== 1 && info.prevBest && !isRace(mode) && info.result !== 'ended') {
       const pct = info.prevBest.score > 0 ? Math.round((g.score / info.prevBest.score) * 100) : 0;
       line('Best ' + fmtInt(info.prevBest.score) + ' · this run ' + pct + '%');
     }
@@ -1237,11 +1281,11 @@
     const pps = secs > 0 ? (st.pieces / secs).toFixed(2) : '0.00';
     // Core stats always; feats only when they happened (no wall of zeros).
     const items = [];
-    if (mode === 'sprint') items.push(['Lines', g.lines], ['Pieces', st.pieces], ['PPS', pps]);
+    if (isRace(mode)) items.push([mode === 'dig' ? 'Time' : 'Lines', mode === 'dig' ? fmtTime(g.time, true) : g.lines], ['Pieces', st.pieces], ['PPS', pps]);
     else items.push(['Lines', g.lines], ['Level', g.level], ['Time', fmtTime(g.time)]);
     const feats = [['Tetrises', st.tetrises], ['T-Spins', st.tspins + st.tspinMinis], ['Max combo', Math.max(0, st.maxCombo)], ['Perfect clears', st.perfectClears], ['Best B2B', Math.max(0, st.maxB2B)]].filter((f) => f[1] > 0);
     items.push(...feats);
-    if (mode !== 'sprint') items.push(['PPS', pps], ['Pieces', st.pieces]);
+    if (!isRace(mode)) items.push(['PPS', pps], ['Pieces', st.pieces]);
     const dl = $('#res-stats');
     dl.textContent = '';
     for (const [k, v] of items.slice(0, 6)) {
@@ -1302,7 +1346,7 @@
     }
     unlocks.hidden = !app.runUnlocks.length && !extra;
     if (app.runUnlocks.length || extra) setTimeout(() => Audio.play('achievement'), 450);
-    $('#res-xp-level').textContent = 'Level ' + after.level;
+    $('#res-xp-level').textContent = 'Player level ' + after.level;
     const nextSkin = S.SKINS.find((k) => k.level > after.level);
     $('#res-next').textContent = nextSkin
       ? fmtInt(250 * nextSkin.level * (nextSkin.level - 1) - info.xpAfter) + ' XP to ' + nextSkin.name + ' blocks (level ' + nextSkin.level + ')'
@@ -1330,6 +1374,7 @@
     const mode = MODE_INFO[g.mode].name + (g.mode === 'daily' && info.run.day ? ' · ' + prettyDay(info.run.day) : '');
     let main;
     if (g.mode === 'sprint') main = info.result === 'cleared' ? '40 lines in ' + fmtTime(g.time, true) : g.lines + '/40 lines';
+    else if (g.mode === 'dig') main = info.result === 'cleared' ? 'Dug 10 rows in ' + fmtTime(g.time, true) : 10 - g.garbageLeft + '/10 rows dug';
     else main = fmtInt(g.score) + ' points · ' + g.lines + ' lines';
     const out = ['Liquid Glass Tetris · ' + mode, main];
     const st = g.stats;
@@ -1591,9 +1636,11 @@
     if (st.maxCombo >= 10) u('combo10');
     if (st.perfectClears >= 1) u('pc');
     if (g.mode === 'marathon') {
-      if (g.level >= 10) u('level10');
-      if (g.level >= 15) u('level15');
-      if (g.level >= 20) u('level20');
+      // Levels climbed in this run: a high start level doesn't hand them out.
+      const climb = g.level - g.startLevel + 1;
+      if (climb >= 10) u('level10');
+      if (climb >= 15) u('level15');
+      if (climb >= 20) u('level20');
     }
     if (g.score >= 100000) u('score100k');
     if (g.mode === 'ultra') {
@@ -1602,6 +1649,10 @@
     }
     if (g.mode === 'zen' && g.lines >= 200) u('zen200');
     if (final) {
+      if (g.mode === 'dig' && ev && ev.result === 'cleared') {
+        u('dig');
+        if (g.time < 45000) u('dig45');
+      }
       if (g.mode === 'sprint' && ev && ev.result === 'cleared') {
         u('sprint');
         if (g.time < 90000) u('sprint90');
@@ -1674,6 +1725,7 @@
     const L = {
       marathon: ['Score', 'Level', 'Lines', 'Time'],
       sprint: ['Time', 'Lines', 'Pieces', 'PPS'],
+      dig: ['Time', 'Garbage', 'Pieces', 'PPS'],
       ultra: ['Score', 'Time', 'Lines', 'Level'],
       zen: ['Score', 'Level', 'Lines', 'Time'],
       daily: ['Score', 'Time', 'Lines', 'Level'],
@@ -1717,6 +1769,16 @@
         frac = Math.min(1, g.lines / 40);
         ringVal = String(rem);
         ringLabel = 'Lines left';
+        break;
+      }
+      case 'dig': {
+        main = fmtTime(g.time, true);
+        a = g.garbageLeft + ' left';
+        b = fmtInt(g.stats.pieces);
+        c = pps;
+        frac = 1 - g.garbageLeft / 10;
+        ringVal = String(g.garbageLeft);
+        ringLabel = 'Rows to dig';
         break;
       }
       case 'ultra':
@@ -1764,7 +1826,7 @@
       els.ringFill.setAttribute('stroke-dashoffset', off);
     }
 
-    if (app.keysHint && (g.stats.pieces >= 6 || g.time > 14000)) hideKeysHint();
+    if (app.keysHint && (g.stats.pieces >= 3 || g.time > 8000 || g.state !== 'playing')) hideKeysHint();
     holdView.drawHold(g.holdType, g.holdUsed, app.holdCell);
     nextView.drawQueue(g.queue, app.nextCount, app.nextCell, app.tall);
     // Screen readers get the pieces as text (read on demand, not announced).
@@ -1807,13 +1869,19 @@
 
   function frame(now) {
     requestAnimationFrame(frame);
-    let dt = app.last ? now - app.last : 16.7;
+    const raw = app.last ? now - app.last : 16.7;
     app.last = now;
-    dt = clamp(dt, 0, 100);
+    // Gravity and lock delay step at most 100 ms per frame...
+    const dt = clamp(raw, 0, 100);
 
     input.update(dt);
     if (app.screen === 'countdown' && app.countdown) updateCountdown(now);
-    if (app.screen === 'playing' && app.game) app.game.update(dt, input.softHeld);
+    if (app.screen === 'playing' && app.game) {
+      // ...but the clock keeps real time through a hitch (Sprint/Ultra records).
+      const g = app.game;
+      if (raw > dt && g.state === 'playing') g.time += Math.min(raw - dt, 1000);
+      g.update(dt, input.softHeld);
+    }
     governFrameRate(dt);
     processEvents(now);
     updateLight(now, dt);
@@ -2254,7 +2322,7 @@
     const box = $('#help-keys');
     box.textContent = '';
     const rows = S.ACTIONS.map((a) => [S.ACTION_LABELS[a], settings.bindings[a]]);
-    rows.push(['Pause', ['Escape', 'KeyP']], ['Restart (Sprint, Ultra, paused)', ['KeyR']]);
+    rows.push(['Pause', ['Escape', 'KeyP']], ['Restart', ['KeyR']]);
     for (const [label, keys] of rows) {
       const r = document.createElement('div');
       r.className = 'help-row';
@@ -2302,10 +2370,10 @@
       } catch (e) {
         date = '';
       }
-      detail.textContent = mode === 'sprint' ? date + ' · ' + run.pieces + ' pieces' : date + ' · ' + run.lines + ' lines · Lv ' + run.level;
+      detail.textContent = isRace(mode) ? date + ' · ' + run.pieces + ' pieces' : date + ' · ' + run.lines + ' lines · Lv ' + run.level;
       const val = document.createElement('span');
       val.className = 'num';
-      val.textContent = mode === 'sprint' ? fmtTime(run.time, true) : fmtInt(run.score);
+      val.textContent = isRace(mode) ? fmtTime(run.time, true) : fmtInt(run.score);
       li.append(rank, detail, val);
       list.appendChild(li);
     });
@@ -2377,19 +2445,17 @@
   /** [current, goal] for achievements that accumulate across games. */
   function achievementProgress() {
     const best = (m, k) => (records[m] || []).reduce((v, r) => Math.max(v, num(r[k])), 0);
-    const sprintBest = S.bestRun(records, 'sprint');
     return {
       lines1000: [profile.lines, 1000],
-      level10: [best('marathon', 'level'), 10],
-      level15: [best('marathon', 'level'), 15],
-      level20: [best('marathon', 'level'), 20],
+      level10: [best('marathon', 'climb'), 10],
+      level15: [best('marathon', 'climb'), 15],
+      level20: [best('marathon', 'climb'), 20],
       score100k: [Math.max(profile.bestScore, 0), 100000],
       ultra30k: [best('ultra', 'score'), 30000],
       ultra60k: [best('ultra', 'score'), 60000],
       zen200: [best('zen', 'lines'), 200],
       streak3: [S.liveStreak(daily, S.dayKey()), 3],
       streak7: [S.liveStreak(daily, S.dayKey()), 7],
-      sprint: [sprintBest ? 40 : best('sprint', 'lines'), 40],
     };
   }
 
@@ -2491,9 +2557,15 @@
           if (!e.repeat) pause();
           return;
         }
-        if (k === 'KeyR' && !e.repeat && (app.mode === 'sprint' || app.mode === 'ultra')) {
+        if (k === 'KeyR' && !e.repeat) {
           e.preventDefault();
-          restart();
+          // Saved modes ask first when there's progress to lose.
+          if (SAVE_MODES.indexOf(app.mode) !== -1) {
+            pause();
+            requestRestart($('#btn-restart'));
+          } else {
+            restart();
+          }
           return;
         }
         if (input.keyDown(e)) flush();
@@ -2641,6 +2713,9 @@
       light.cssY = light.y;
       els.root.style.setProperty('--lx', light.x.toFixed(0) + 'px');
       els.root.style.setProperty('--ly', light.y.toFixed(0) + 'px');
+      // CSS rims are brightest on the side that faces the light.
+      const ang = (Math.atan2(window.innerWidth / 2 - light.x, light.y - window.innerHeight / 2) * 180) / Math.PI;
+      els.root.style.setProperty('--rim-angle', ang.toFixed(0) + 'deg');
     }
   }
 

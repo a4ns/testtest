@@ -75,6 +75,7 @@ uniform float uLight;
 uniform vec2 uLightPos;
 uniform float uDpr;
 uniform float uMag;
+uniform float uText;
 out vec4 o;
 
 float sdBox(vec2 p, vec2 b, float r) {
@@ -120,24 +121,51 @@ void main() {
   // A thick convex slab: the middle magnifies a little, and near the rim the
   // backdrop bends inward hard, splitting into colour fringes (dispersion).
   vec2 q = c + p * (1.0 - uMag) - n * lens * lens * uRefract;
-  vec3 col = bgAt(q, uLod);
+  // The rim band shows the backdrop sharp and bent; frost is for the body.
+  float lod = mix(uLod, min(uLod, 0.8), lens);
+  vec3 col = bgAt(q, lod);
   if (lens > 0.01) {
-    float disp = lens * lens * (0.9 * uDpr + uRefract * 0.16);
-    col.r = bgAt(q + n * disp, uLod).r;
-    col.b = bgAt(q - n * disp, uLod).b;
+    float disp = lens * lens * (0.9 * uDpr + uRefract * 0.3);
+    col.r = bgAt(q + n * disp, lod).r;
+    col.b = bgAt(q - n * disp, lod).b;
   }
 
-  // Adaptive tint from the brightness of what is underneath.
-  vec3 avg = textureLod(uBg, vec2(c.x / uRes.x, 1.0 - c.y / uRes.y), 5.0).rgb;
-  float lum = dot(avg, vec3(0.2126, 0.7152, 0.0722));
+  // Adaptive tint: how bright is the backdrop across the whole slab?
+  vec2 hr = hb * 0.5;
+  float lum = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec2 o = i == 0 ? vec2(0.0) : vec2(i == 1 || i == 3 ? -1.0 : 1.0, i < 3 ? -1.0 : 1.0) * hr;
+    vec3 sm = textureLod(uBg, vec2((c.x + o.x) / uRes.x, 1.0 - (c.y + o.y) / uRes.y), 4.5).rgb;
+    lum = max(lum, dot(sm, vec3(0.2126, 0.7152, 0.0722)));
+  }
   vec3 dimColor = uLight > 0.5 ? vec3(1.0) : vec3(0.03, 0.04, 0.13);
-  float dimAmt = uLight > 0.5 ? uDim * mix(1.6, 0.8, smoothstep(0.45, 0.9, lum)) : uDim * mix(0.75, 1.7, smoothstep(0.12, 0.55, lum));
-  col = mix(col, dimColor, clamp(dimAmt, 0.0, 0.92));
+  float dimAmt;
+  if (uLight > 0.5) {
+    // Dark text: lift the backdrop until it is at least this bright.
+    float need = clamp((0.5 - lum) / max(1.0 - lum, 0.05), 0.0, 1.0);
+    dimAmt = max(uDim * mix(1.4, 0.8, smoothstep(0.45, 0.9, lum)), need * uText);
+  } else {
+    // White text: deepen the backdrop until it is at most this bright.
+    float need = clamp((lum - 0.14) / max(lum - 0.035, 0.05), 0.0, 1.0);
+    dimAmt = max(uDim * mix(0.75, 1.5, smoothstep(0.12, 0.55, lum)), need * uText);
+  }
+  col = mix(col, dimColor, clamp(dimAmt, 0.0, 0.94));
 
-  // Milky body (stronger at the top) and light caught in the thick edge.
+  // Let colour through: a touch more saturation inside the slab.
+  float cl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = max(mix(vec3(cl), col, 1.18), 0.0);
+
+  // Milky body (stronger at the top) and light caught in the thick edge. In
+  // dark mode a bright backdrop gets no extra milk (it would wash out text).
   float vy = clamp((vPx.y - uRect.y) / uRect.w, 0.0, 1.0);
-  col = mix(col, vec3(1.0), clamp(uTint * mix(1.3, 0.55, vy) + uGlow * 0.14, 0.0, 1.0));
+  float milk = uTint * (uLight > 0.5 ? 1.0 : 1.0 - smoothstep(0.2, 0.5, lum));
+  col = mix(col, vec3(1.0), clamp(milk * mix(1.3, 0.55, vy) + uGlow * 0.14, 0.0, 1.0));
   col += lens * (0.05 + 0.05 * uLight);
+
+  // A thin dark line just inside the rim sells the slab's thickness.
+  float rimW0 = 1.25 * uDpr;
+  float edge = smoothstep(rimW0 * 1.5, rimW0 * 2.5, inside) * (1.0 - smoothstep(rimW0 * 2.5, rimW0 * 4.5, inside));
+  col *= 1.0 - edge * (uLight > 0.5 ? 0.06 : 0.12);
 
   // Specular rim: a thin line, brightest on the arc facing the light.
   vec2 L = normalize(uLightPos - c + vec2(0.0001, 0.0));
@@ -158,10 +186,11 @@ void main() {
   // Clearer than frosted CSS glass: the playfield keeps enough blur for the
   // stack to read; text surfaces lean on adaptive dimming instead of frost.
   const MATERIALS = {
-    board: { lod: 3.7, refract: 24, band: 30, mag: 0.012, dim: [0.46, 0.32], tint: [0.04, 0.32], shadow: [0.34, 0.12] },
-    panel: { lod: 2.5, refract: 22, band: 24, mag: 0.02, dim: [0.36, 0.22], tint: [0.07, 0.3], shadow: [0.3, 0.12] },
-    card: { lod: 1.8, refract: 30, band: 30, mag: 0.03, dim: [0.24, 0.14], tint: [0.08, 0.26], shadow: [0.28, 0.12] },
-    control: { lod: 1.0, refract: 18, band: 20, mag: 0.04, dim: [0.12, 0.06], tint: [0.12, 0.4], shadow: [0.22, 0.1] },
+    // text: how strongly the slab guarantees contrast for the text it carries.
+    board: { lod: 3.7, refract: 24, band: 30, mag: 0.012, text: 0.6, dim: [0.46, 0.2], tint: [0.04, 0.2], shadow: [0.34, 0.14] },
+    panel: { lod: 2.5, refract: 22, band: 24, mag: 0.02, text: 1, dim: [0.36, 0.14], tint: [0.07, 0.18], shadow: [0.3, 0.14] },
+    card: { lod: 1.8, refract: 30, band: 30, mag: 0.03, text: 1, dim: [0.3, 0.1], tint: [0.08, 0.16], shadow: [0.28, 0.14] },
+    control: { lod: 1.0, refract: 18, band: 20, mag: 0.04, text: 1, dim: [0.16, 0.06], tint: [0.12, 0.26], shadow: [0.22, 0.12] },
   };
 
   function materialFor(el) {
@@ -277,7 +306,7 @@ void main() {
       state.progs.bg = program(gl, BG_FRAG, ['uBox', 'uRes', 'uBlob', 'uFx']);
       state.progs.copy = program(gl, COPY_FRAG, ['uBox', 'uRes', 'uBg']);
       state.progs.glass = program(gl, GLASS_FRAG, [
-        'uBox', 'uRes', 'uBg', 'uRect', 'uRadius', 'uOpacity', 'uLod', 'uRefract', 'uBand', 'uDim', 'uTint', 'uGlow', 'uShadow', 'uDanger', 'uLight', 'uLightPos', 'uDpr', 'uMag',
+        'uBox', 'uRes', 'uBg', 'uRect', 'uRadius', 'uOpacity', 'uLod', 'uRefract', 'uBand', 'uDim', 'uTint', 'uGlow', 'uShadow', 'uDanger', 'uLight', 'uLightPos', 'uDpr', 'uMag', 'uText',
       ]);
     } catch (e) {
       return false;
@@ -384,7 +413,7 @@ void main() {
       if (r.width < 2 || r.height < 2 || r.bottom < -40 || r.top > root.innerHeight + 40) continue;
       const op = opacityOf(it);
       if (op <= 0) continue;
-      const glow = it.el.classList.contains('is-pressed') ? 1 : it.el.matches(':hover') ? 0.55 : 0;
+      const glow = it.el.classList.contains('is-pressed') || it.el.matches(':active') ? 1 : it.el.matches(':hover') ? 0.55 : 0;
       const dz = it.mat === MATERIALS.board ? danger || 0 : 0;
       draw.push({ it, r, op, glow, dz });
       sig += r.left.toFixed(1) + ',' + r.top.toFixed(1) + ',' + r.width.toFixed(1) + ',' + r.height.toFixed(1) + ',' + op.toFixed(3) + ',' + glow + ',' + dz.toFixed(2) + ';';
@@ -475,6 +504,7 @@ void main() {
       gl.uniform1f(pg.u.uShadow, m.shadow[s]);
       gl.uniform1f(pg.u.uDanger, dz);
       gl.uniform1f(pg.u.uMag, m.mag);
+      gl.uniform1f(pg.u.uText, m.text);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
   }

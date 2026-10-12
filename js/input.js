@@ -53,11 +53,12 @@
       return !!s && s.size > 0;
     }
 
-    press(action, src) {
+    /** at: when the press really happened (event timestamp), if known. */
+    press(action, src, at) {
       const set = this.sources[action] || (this.sources[action] = new Set());
       const was = set.size > 0;
       set.add(src);
-      if (!was) this.fire(action);
+      if (!was) this.fire(action, at);
     }
 
     release(action, src) {
@@ -104,7 +105,7 @@
       }
     }
 
-    fire(action) {
+    fire(action, at) {
       const game = this.getGame();
       switch (action) {
         case 'left':
@@ -112,7 +113,8 @@
           const d = action === 'left' ? -1 : 1;
           this.dir = d;
           // DAS counts from the moment of the press, not from the next frame.
-          this.das = this.lastUpdate ? -clampMs(performance.now() - this.lastUpdate) : 0;
+          const t = typeof at === 'number' && at > 0 ? at : performance.now();
+          this.das = this.lastUpdate ? -clampMs(t - this.lastUpdate) : 0;
           this.rep = 0;
           if (game) game.move(d);
           break;
@@ -194,7 +196,7 @@
       this.keysDown.add(e.code);
       e.preventDefault();
       const src = 'k:' + e.code;
-      if (!e.repeat) this.press(action, src);
+      if (!e.repeat) this.press(action, src, e.timeStamp);
       // A direction still held across a restart arrives only as auto-repeat
       // events; pick it back up (never for one-shot actions like hard drop).
       else if ((action === 'left' || action === 'right' || action === 'soft') && !this.isHeld(action)) this.press(action, src);
@@ -225,7 +227,7 @@
             }
           }
           el.classList.add('is-pressed');
-          this.press(action, 'p:' + e.pointerId);
+          this.press(action, 'p:' + e.pointerId, e.timeStamp);
           if (this.handlers.haptic) this.handlers.haptic(6);
         };
         const up = (e) => {

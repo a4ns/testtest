@@ -13,8 +13,8 @@
 
   --bg: #070a1f;
   --ink: #f5f7ff;
-  --ink-2: rgba(236, 240, 255, 0.8);
-  --ink-3: rgba(236, 240, 255, 0.7);
+  --ink-2: rgba(240, 243, 255, 0.86);
+  --ink-3: rgba(240, 243, 255, 0.78);
   --accent: #64d2ff;
   --accent-strong: #0a84ff;
   --good: #30d158;
@@ -32,7 +32,7 @@
   --well-strong: rgba(255, 255, 255, 0.12);
   --board-fill: rgba(6, 8, 30, 0.42);
   --scrim: rgba(3, 5, 22, 0.42);
-  --text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+  --text-shadow: 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35), 0 2px 16px rgba(0, 0, 0, 0.45);
   /* Dimming layers keep text legible over busy wallpaper (adaptive tint). */
   --dim-card: rgba(8, 10, 32, 0.16);
   --dim-panel: rgba(8, 10, 32, 0.28);
@@ -223,8 +223,9 @@ button {
   border-radius: inherit;
   padding: 1.3px;
   pointer-events: none;
+  /* Brightest on the side facing the light (angle kept up to date by app.js). */
   background: linear-gradient(
-    135deg,
+    var(--rim-angle, 135deg),
     rgba(255, 255, 255, 0.85),
     rgba(255, 255, 255, 0.14) 28%,
     rgba(255, 255, 255, 0) 50%,
@@ -304,9 +305,10 @@ button {
   filter: brightness(1.12);
 }
 
+/* Pressed glass swells and lights up (the compositor adds the glow). */
 .btn:active {
-  transform: scale(0.96);
-  transition-duration: 0.08s;
+  transform: scale(1.05);
+  transition-duration: 0.18s;
 }
 
 .btn-primary {
@@ -353,8 +355,8 @@ button {
 }
 
 .icon-btn:active {
-  transform: scale(0.92);
-  transition-duration: 0.08s;
+  transform: scale(1.12);
+  transition-duration: 0.18s;
 }
 
 :focus {
@@ -1280,7 +1282,7 @@ button {
   font: 700 12px/1 var(--font-ui);
   letter-spacing: 0.42em;
   text-transform: uppercase;
-  color: var(--ink-2);
+  color: var(--ink);
   text-shadow: var(--text-shadow);
 }
 
@@ -1636,8 +1638,8 @@ button {
 }
 
 .mode-card:active {
-  transform: scale(0.97);
-  transition-duration: 0.08s;
+  transform: scale(1.03);
+  transition-duration: 0.18s;
 }
 
 .mode-card:focus-visible {
@@ -1883,11 +1885,19 @@ kbd {
   position: relative;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  /* Every label fits whole; spare room is shared out evenly. */
+  grid-auto-columns: minmax(max-content, 1fr);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
   padding: 4px;
   border-radius: 999px;
   background: var(--well);
   box-shadow: inset 0 0 0 1px var(--well), inset 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.segmented::-webkit-scrollbar {
+  display: none;
 }
 
 .segmented button {
@@ -2886,7 +2896,8 @@ button.unlock-chip.is-action svg {
 .keys-hint {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--bpad) + var(--cell) * 2.2);
+  /* Mid-well, clear of the floor where the first pieces and their ghosts land. */
+  bottom: calc(var(--bpad) + var(--cell) * 7.5);
   transform: translateX(-50%);
   z-index: 3;
   display: flex;
@@ -2951,4 +2962,88 @@ button.unlock-chip.is-action svg {
   .daily-week {
     display: none;
   }
+}
+
+@media (max-width: 400px) {
+  .segmented button {
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+}
+
+/* Landscape phones: while paused the sheet takes the stage; the side panels
+   (veiled anyway) step back instead of peeking out from behind it. */
+.game.short.is-paused .panel,
+.game.short.is-paused .board-shell {
+  opacity: 0;
+  transition: opacity 0.25s var(--ease);
+}
+
+/* Liquid Glass refracts a clean backdrop; grain would sit on top of it. */
+:root.gl-on .grain {
+  display: none;
+}
+
+/* Windows High Contrast and other forced-colour modes. */
+@media (forced-colors: active) {
+  .glass,
+  .btn,
+  .icon-btn,
+  .mode-card,
+  .keycap,
+  .segmented button,
+  .skin,
+  .swatch,
+  .player,
+  .continue {
+    border: 1px solid ButtonText;
+  }
+
+  .segmented button[aria-selected="true"],
+  .segmented button[aria-pressed="true"],
+  .skin[aria-pressed="true"],
+  .swatch[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .seg-lens {
+    display: none;
+  }
+}
+
+/* Zen closes the grid as a wide card. */
+.mode-zen {
+  grid-column: span 2;
+}
+
+/* Wide screens: three modes a row keeps the whole menu in view. */
+@media (min-width: 900px) and (min-height: 521px) {
+  .menu {
+    width: min(800px, 100%);
+  }
+
+  .mode-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .mode-daily {
+    grid-column: span 3;
+  }
+}
+
+/* The travelling glass of a morph (see morphOpen/morphClose in app.js). */
+.morph-blob {
+  position: fixed;
+  z-index: 25;
+  pointer-events: none;
+  --dim: var(--dim-sheet);
+  --blur: 20px;
+  --sat: 1.8;
+  will-change: left, top, width, height;
+}
+
+.morph-blob.is-modal {
+  z-index: 35;
 }

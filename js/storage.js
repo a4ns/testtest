@@ -94,7 +94,9 @@
     return { level: n, xp, base, next, frac: (xp - base) / (next - base) };
   }
 
-  const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'zen', 'daily'];
+  const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'dig', 'zen', 'daily'];
+  // Races: the record is the fastest finish rather than the highest score.
+  const RACE_MODES = ['sprint', 'dig'];
 
   // Daily Challenge medals (two minutes, Ultra rules).
   const DAILY_MEDALS = [
@@ -124,13 +126,15 @@
     { id: 'combo5', name: 'Flow State', desc: 'Reach a 5 combo.' },
     { id: 'combo10', name: 'Unstoppable', desc: 'Reach a 10 combo.' },
     { id: 'pc', name: 'Crystal Clear', desc: 'Empty the whole field with a Perfect Clear.' },
-    { id: 'level10', name: 'Momentum', desc: 'Reach level 10 in Marathon.' },
-    { id: 'level15', name: 'Velocity', desc: 'Reach level 15 in Marathon.' },
-    { id: 'level20', name: 'Terminal Velocity', desc: 'Reach level 20 in Marathon.' },
+    { id: 'level10', name: 'Momentum', desc: 'Climb 9 levels in one Marathon (1 → 10).' },
+    { id: 'level15', name: 'Velocity', desc: 'Climb 14 levels in one Marathon (1 → 15).' },
+    { id: 'level20', name: 'Terminal Velocity', desc: 'Climb 19 levels in one Marathon (1 → 20).' },
     { id: 'score100k', name: 'Six Figures', desc: 'Score 100,000 points in one game.' },
     { id: 'sprint', name: 'Sprinter', desc: 'Finish Sprint 40L.' },
     { id: 'sprint90', name: 'Swift', desc: 'Finish Sprint in under 1:30.' },
     { id: 'sprint60', name: 'Lightspeed', desc: 'Finish Sprint in under 1:00.' },
+    { id: 'dig', name: 'Excavator', desc: 'Finish a Dig race.' },
+    { id: 'dig45', name: 'Bedrock', desc: 'Finish Dig in under 0:45.' },
     { id: 'ultra30k', name: 'Ultra 30K', desc: 'Score 30,000 in Ultra.' },
     { id: 'ultra60k', name: 'Ultra 60K', desc: 'Score 60,000 in Ultra.' },
     { id: 'zen200', name: 'Still Water', desc: 'Clear 200 lines in one Zen session.' },
@@ -273,7 +277,7 @@
 
   /** Lower is better for sprint (time), higher is better (score) elsewhere. */
   function compareRuns(mode, a, b) {
-    if (mode === 'sprint') return a.time - b.time;
+    if (RACE_MODES.indexOf(mode) !== -1) return a.time - b.time;
     return b.score - a.score || b.lines - a.lines;
   }
 
@@ -402,6 +406,7 @@
     RESERVED_KEYS,
     SDF_INFINITE,
     MODE_ORDER,
+    RACE_MODES,
     ACHIEVEMENTS,
     SKINS,
     playerXP,

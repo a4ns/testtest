@@ -52,6 +52,7 @@
       <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4 5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M4.8 14.5A8 8 0 1 0 6 7.5L4 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11.2 12 4l8 7.2V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></symbol>
       <symbol id="i-infinity" viewBox="0 0 24 24"><path d="M12 12c-2-2.7-4-4-6-4a4 4 0 0 0 0 8c2 0 4-1.3 6-4zm0 0c2 2.7 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.3-6 4z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" /></symbol>
+      <symbol id="i-dig" viewBox="0 0 24 24"><rect x="3" y="14" width="18" height="3" rx="1" fill="currentColor" opacity="0.55" /><rect x="3" y="18.5" width="18" height="3" rx="1" fill="currentColor" opacity="0.8" /><path d="M12 3v8.5M8.5 8.5 12 12l3.5-3.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2.5 5 13.5h6.5l-1 8 8.5-11h-6.5z" fill="currentColor" /></symbol>
       <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 13.5V9.5M9.5 2.8h5M18.5 6l1.5-1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></symbol>
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" fill="currentColor" /></symbol>
@@ -182,7 +183,13 @@
             <span class="mode-desc">Two minutes. Score as much as you can.</span>
             <span class="mode-best"><span>Best</span><b data-best="ultra">—</b></span>
           </button>
-          <button class="glass mode-card" type="button" data-mode="zen" style="--tint: #30d158">
+          <button class="glass mode-card" type="button" data-mode="dig" style="--tint: #c69c6d">
+            <span class="mode-icon" aria-hidden="true"><svg><use href="#i-dig" /></svg></span>
+            <span class="mode-name">Dig</span>
+            <span class="mode-desc">Dig through ten rows of messy garbage.</span>
+            <span class="mode-best"><span>Best</span><b data-best="dig">—</b></span>
+          </button>
+          <button class="glass mode-card mode-zen" type="button" data-mode="zen" style="--tint: #30d158">
             <span class="mode-icon" aria-hidden="true"><svg><use href="#i-moon" /></svg></span>
             <span class="mode-name">Zen</span>
             <span class="mode-desc">No game over. Gentle speed. Breathe.</span>
@@ -441,7 +448,7 @@
         <div class="segmented tabs" role="tablist" aria-label="Records" data-tabs="records">
           <span class="seg-lens" aria-hidden="true"></span>
           <button type="button" role="tab" id="tab-r-best" aria-controls="panel-r-best" aria-selected="true">Best runs</button>
-          <button type="button" role="tab" id="tab-r-ach" aria-controls="panel-r-ach" aria-selected="false" tabindex="-1">Achievements</button>
+          <button type="button" role="tab" id="tab-r-ach" aria-controls="panel-r-ach" aria-selected="false" tabindex="-1">Awards</button>
           <button type="button" role="tab" id="tab-r-life" aria-controls="panel-r-life" aria-selected="false" tabindex="-1">Lifetime</button>
         </div>
         <div class="tab-panel" role="tabpanel" id="panel-r-best" aria-labelledby="tab-r-best">
@@ -450,6 +457,7 @@
             <button type="button" data-value="marathon">Marathon</button>
             <button type="button" data-value="sprint">Sprint</button>
             <button type="button" data-value="ultra">Ultra</button>
+            <button type="button" data-value="dig">Dig</button>
             <button type="button" data-value="zen">Zen</button>
             <button type="button" data-value="daily">Daily</button>
           </div>

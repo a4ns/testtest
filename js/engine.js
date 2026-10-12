@@ -28,6 +28,7 @@
 
   const PIECE_TYPES = ['I', 'J', 'L', 'O', 'S', 'T', 'Z'];
   const PIECE_ID = { I: 1, J: 2, L: 3, O: 4, S: 5, T: 6, Z: 7 };
+  const GARBAGE_ID = 8;
   const ID_PIECE = [null, 'I', 'J', 'L', 'O', 'S', 'T', 'Z'];
 
   const BASE_SHAPES = {
@@ -111,7 +112,13 @@
     ultra: { name: 'Ultra', levelUp: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 120000, topOut: true },
     zen: { name: 'Zen', levelUp: true, maxGravityLevel: 5, goalLines: 0, timeLimit: 0, topOut: false },
     daily: { name: 'Daily', levelUp: true, maxGravityLevel: 20, goalLines: 0, timeLimit: 120000, topOut: true },
+    // Dig: race to clear ten rows of messy garbage.
+    dig: { name: 'Dig', levelUp: false, maxGravityLevel: 1, goalLines: 0, goalGarbage: 10, timeLimit: 0, topOut: true },
   };
+
+  // Gravity at or beyond 20 rows a frame (60 Hz) is "20G": pieces fall to the
+  // floor the instant they appear or move.
+  const FRAME_MS = 1000 / 60;
 
   /** Milliseconds per row at a level (guideline gravity curve). */
   function msPerRow(level) {
@@ -232,6 +239,23 @@
       this.lowestY = 0;
       this.lastWasRotation = false;
       this.lastKickTST = false;
+      this.garbageLeft = 0;
+      if (this.rules.goalGarbage) this.addGarbage(this.rules.goalGarbage);
+    }
+
+    /** Fills the bottom with rows of garbage, one hole each. Holes move
+     * column 60% of the time (a messy "cheese" pattern), from their own RNG
+     * so the piece sequence stays the same for a given seed. */
+    addGarbage(n) {
+      const rand = mulberry32((this.seed ^ 0x9e3779b9) >>> 0);
+      let hole = Math.floor(rand() * COLS);
+      for (let i = 0; i < n; i++) {
+        if (i > 0 && rand() < 0.6) hole = (hole + 1 + Math.floor(rand() * (COLS - 1))) % COLS;
+        const row = new Array(COLS).fill(GARBAGE_ID);
+        row[hole] = 0;
+        this.board[ROWS - 1 - i] = row;
+      }
+      this.garbageLeft = n;
     }
 
     // ---- queries -------------------------------------------------------
@@ -323,7 +347,27 @@
       this.lastWasRotation = false;
       this.lastKickTST = false;
       this.events.push({ type: 'spawn', piece: type });
+      this.apply20G();
       return true;
+    }
+
+    /** Under 20G the piece is always at the bottom of where it can go. */
+    is20G() {
+      return msPerRow(this.gravityLevel()) * 20 <= FRAME_MS;
+    }
+
+    apply20G() {
+      const p = this.active;
+      if (!p || !this.is20G()) return;
+      let d = 0;
+      while (!this.collides(p.type, p.rot, p.x, p.y + 1)) {
+        p.y++;
+        d++;
+      }
+      if (!d) return;
+      this.lastWasRotation = false;
+      this.trackLowest();
+      this.events.push({ type: 'land', piece: p.type, soft: false });
     }
 
     /** Returns true if play continues (Zen), false if the game ended. */
@@ -448,6 +492,7 @@
       this.lastWasRotation = false;
       this.afterManipulation(wasGrounded);
       this.events.push({ type: 'move', dx });
+      this.apply20G();
       return true;
     }
 
@@ -479,6 +524,7 @@
           this.lastKickTST = dir !== 2 && i === 4;
           this.afterManipulation(wasGrounded);
           this.events.push({ type: 'rotate', dir, kick: i, tspin: this.detectTSpin() });
+          this.apply20G();
           return true;
         }
       }
@@ -559,6 +605,8 @@
         if (this.board[y].every((v) => v !== 0)) fullRows.push(y);
       }
       const clearedCells = fullRows.map((y) => this.board[y].slice());
+      const garbageCleared = clearedCells.filter((row) => row.indexOf(GARBAGE_ID) !== -1).length;
+      if (garbageCleared) this.garbageLeft = Math.max(0, this.garbageLeft - garbageCleared);
       if (fullRows.length) {
         const keep = this.board.filter((_, y) => fullRows.indexOf(y) === -1);
         while (keep.length < ROWS) keep.unshift(new Array(COLS).fill(0));
@@ -573,6 +621,10 @@
         if (!this.topOut('lockout')) return;
       }
       if (this.rules.goalLines && this.lines >= this.rules.goalLines) {
+        this.finish('cleared');
+        return;
+      }
+      if (this.rules.goalGarbage && this.garbageLeft === 0) {
         this.finish('cleared');
         return;
       }
@@ -771,6 +823,7 @@
     SPAWN_Y,
     PIECE_TYPES,
     PIECE_ID,
+    GARBAGE_ID,
     ID_PIECE,
     SHAPES,
     KICKS_JLSTZ,

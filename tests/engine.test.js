@@ -484,3 +484,56 @@ test('restore keeps the deepest row reached, so a kick upward cannot refresh res
   assert.equal(r.lowestY, 34);
   assert.equal(r.lockResets, 9);
 });
+
+test('at 20G a spawned piece drops at once and cannot slide over a tower', () => {
+  const g = new Game({ mode: 'marathon', startLevel: 20, seed: 9 });
+  g.start();
+  assert.ok(g.is20G());
+  // The new piece is already resting on the floor.
+  assert.ok(g.isGrounded());
+  // A tower right of the piece blocks sideways travel at the floor.
+  const p = g.active;
+  const cells = g.cellsOf(p);
+  const maxX = Math.max(...cells.map((c) => c[0]));
+  for (let y = 22; y < E.ROWS; y++) g.board[y][Math.min(9, maxX + 1)] = 8;
+  const x0 = p.x;
+  for (let i = 0; i < 10; i++) g.move(1);
+  assert.equal(g.active.x, x0);
+});
+
+test('below 20G, spawning does not drop the piece', () => {
+  const g = new Game({ mode: 'marathon', startLevel: 1, seed: 9 });
+  g.start();
+  assert.ok(!g.is20G());
+  assert.equal(g.active.y, E.SPAWN_Y + 1);
+});
+
+test('dig mode starts with ten garbage rows, one hole each, and ends when they are gone', () => {
+  const g = new Game({ mode: 'dig', seed: 3 });
+  assert.equal(g.garbageLeft, 10);
+  for (let i = 0; i < 10; i++) {
+    const row = g.board[E.ROWS - 1 - i];
+    assert.equal(row.filter((v) => v === 0).length, 1);
+    assert.equal(row.filter((v) => v === E.GARBAGE_ID).length, 9);
+  }
+  assert.ok(g.board[E.ROWS - 11].every((v) => v === 0));
+  // Same seed, same cheese and the same pieces.
+  const h = new Game({ mode: 'dig', seed: 3 });
+  assert.deepEqual(h.board, g.board);
+  assert.deepEqual(h.queue, g.queue);
+  // Clearing every garbage row finishes the race.
+  g.start();
+  for (let i = 0; i < 9; i++) {
+    const y = E.ROWS - 1 - i;
+    g.board[y] = g.board[y].map(() => E.GARBAGE_ID);
+  }
+  const y = E.ROWS - 10;
+  const hole = g.board[y].indexOf(0);
+  g.board[y] = g.board[y].map((v, x) => (x === hole ? 0 : E.GARBAGE_ID));
+  g.active = { type: 'I', rot: 1, x: hole - 2, y: E.ROWS - 14 };
+  // Vertical I occupies column x+2; drop it into the hole.
+  g.hardDrop();
+  assert.equal(g.garbageLeft, 0);
+  assert.equal(g.state, 'won');
+  assert.equal(g.endReason, 'cleared');
+});
