@@ -64,7 +64,10 @@
 
   // ---- sprites -----------------------------------------------------------
 
-  function makeTile(hex, s) {
+  function makeTile(hex, s, skin) {
+    if (skin === 'crystal') return makeCrystal(hex, s);
+    if (skin === 'neon') return makeNeon(hex, s);
+    if (skin === 'pearl') return makePearl(hex, s);
     const c = makeCanvas(s, s);
     const g = c.getContext('2d');
     const rgb = hexToRgb(hex);
@@ -124,6 +127,133 @@
     return c;
   }
 
+  // Crystal: clear cut glass with a table facet and bright bevels.
+  function makeCrystal(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.05);
+    const x = inset;
+    const y = inset;
+    const w = s - inset * 2;
+    const r = w * 0.16;
+    roundRect(g, x, y, w, w, r);
+    const body = g.createLinearGradient(x, y, x + w, y + w);
+    body.addColorStop(0, rgba(mix(rgb, WHITE, 0.6), 0.75));
+    body.addColorStop(0.5, rgba(rgb, 0.55));
+    body.addColorStop(1, rgba(mix(rgb, BLACK, 0.2), 0.75));
+    g.fillStyle = body;
+    g.fill();
+    g.save();
+    roundRect(g, x, y, w, w, r);
+    g.clip();
+    const t = w * 0.22;
+    // Bevels: light top/left, shade bottom/right.
+    g.fillStyle = 'rgba(255,255,255,0.42)';
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w, y);
+    g.lineTo(x + w - t, y + t);
+    g.lineTo(x + t, y + t);
+    g.closePath();
+    g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.22)';
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + t, y + t);
+    g.lineTo(x + t, y + w - t);
+    g.lineTo(x, y + w);
+    g.closePath();
+    g.fill();
+    g.fillStyle = rgba(mix(rgb, BLACK, 0.45), 0.35);
+    g.beginPath();
+    g.moveTo(x + w, y + w);
+    g.lineTo(x, y + w);
+    g.lineTo(x + t, y + w - t);
+    g.lineTo(x + w - t, y + w - t);
+    g.closePath();
+    g.fill();
+    // Table facet with a diagonal flash.
+    const flash = g.createLinearGradient(x + t, y + t, x + w - t, y + w - t);
+    flash.addColorStop(0, 'rgba(255,255,255,0.35)');
+    flash.addColorStop(0.45, 'rgba(255,255,255,0.05)');
+    flash.addColorStop(0.55, 'rgba(255,255,255,0.28)');
+    flash.addColorStop(1, 'rgba(255,255,255,0.02)');
+    g.fillStyle = flash;
+    g.fillRect(x + t, y + t, w - 2 * t, w - 2 * t);
+    g.restore();
+    const lw = Math.max(1, s * 0.04);
+    roundRect(g, x + lw / 2, y + lw / 2, w - lw, w - lw, r);
+    g.lineWidth = lw;
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.stroke();
+    return c;
+  }
+
+  // Neon: a dark glass core lit by a glowing coloured tube.
+  function makeNeon(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(2, s * 0.12);
+    const w = s - inset * 2;
+    const r = w * 0.28;
+    roundRect(g, inset, inset, w, w, r);
+    const core = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, w * 0.7);
+    core.addColorStop(0, rgba(mix(rgb, BLACK, 0.55), 0.92));
+    core.addColorStop(1, rgba(mix(rgb, BLACK, 0.8), 0.95));
+    g.fillStyle = core;
+    g.fill();
+    g.save();
+    g.shadowColor = rgba(rgb, 0.95);
+    g.shadowBlur = s * 0.22;
+    g.lineWidth = Math.max(1.5, s * 0.08);
+    g.strokeStyle = rgba(mix(rgb, WHITE, 0.25), 1);
+    roundRect(g, inset, inset, w, w, r);
+    g.stroke();
+    g.restore();
+    g.lineWidth = Math.max(1, s * 0.025);
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    roundRect(g, inset + s * 0.02, inset + s * 0.02, w - s * 0.04, w - s * 0.04, r * 0.9);
+    g.stroke();
+    return c;
+  }
+
+  // Pearl: an opaque pastel bead with an iridescent sheen.
+  function makePearl(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.06);
+    const w = s - inset * 2;
+    const r = w * 0.38;
+    roundRect(g, inset, inset, w, w, r);
+    const body = g.createRadialGradient(inset + w * 0.35, inset + w * 0.3, 0, s / 2, s / 2, w * 0.75);
+    body.addColorStop(0, rgba(mix(rgb, WHITE, 0.85), 1));
+    body.addColorStop(0.55, rgba(mix(rgb, WHITE, 0.45), 1));
+    body.addColorStop(1, rgba(mix(rgb, BLACK, 0.12), 1));
+    g.fillStyle = body;
+    g.fill();
+    g.save();
+    roundRect(g, inset, inset, w, w, r);
+    g.clip();
+    const iri = g.createLinearGradient(inset, inset + w, inset + w, inset);
+    iri.addColorStop(0, 'rgba(255,140,220,0.28)');
+    iri.addColorStop(0.5, 'rgba(140,255,240,0.18)');
+    iri.addColorStop(1, 'rgba(160,170,255,0.28)');
+    g.fillStyle = iri;
+    g.fillRect(inset, inset, w, w);
+    g.restore();
+    const gx = inset + w * 0.32;
+    const gy = inset + w * 0.28;
+    const gl = g.createRadialGradient(gx, gy, 0, gx, gy, w * 0.22);
+    gl.addColorStop(0, 'rgba(255,255,255,0.95)');
+    gl.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gl;
+    g.fillRect(inset, inset, w, w);
+    return c;
+  }
+
   function makeGhost(hex, s, light) {
     const c = makeCanvas(s, s);
     const g = c.getContext('2d');
@@ -170,17 +300,20 @@
     constructor() {
       this.size = 0;
       this.light = null;
+      this.skin = 'jelly';
+      this.builtSkin = null;
       this.tiles = {};
       this.ghosts = {};
       this.glows = {};
       this.flash = null;
     }
     build(size, light) {
-      if (size === this.size && light === this.light) return;
+      if (size === this.size && light === this.light && this.skin === this.builtSkin) return;
       this.size = size;
       this.light = light;
+      this.builtSkin = this.skin;
       for (const k of Object.keys(COLORS)) {
-        this.tiles[k] = makeTile(COLORS[k], size);
+        this.tiles[k] = makeTile(COLORS[k], size, this.skin);
         this.ghosts[k] = makeGhost(COLORS[k], size, light);
         this.glows[k] = makeGlow(COLORS[k], size);
       }
@@ -402,7 +535,9 @@
         greyFrom = ROWS - Math.ceil(p * (VISIBLE_ROWS + EXTRA_TOP));
       }
       if (this.collapse && now - this.collapse.start > COLLAPSE_DELAY + COLLAPSE_MS) this.collapse = null;
-      for (let y = FIRST_ROW; y < ROWS; y++) {
+      // During the game-over animation keep the frozen stack inside the glass.
+      const firstDrawn = this.gameOverAt ? HIDDEN_ROWS : FIRST_ROW;
+      for (let y = firstDrawn; y < ROWS; y++) {
         const row = game.board[y];
         const vy = (y - FIRST_ROW - this.rowOffset(y, now)) * c;
         for (let x = 0; x < COLS; x++) {
@@ -635,13 +770,13 @@
       return g;
     }
     drawHold(type, used, cell) {
-      const g = this.begin('h' + type + used + cell + sprites.size);
+      const g = this.begin('h' + type + used + cell + sprites.size + sprites.builtSkin);
       if (!g || !type) return;
       drawPiece(g, type, this.w / 2, this.h / 2, cell, used ? 0.35 : 1, used);
     }
     drawQueue(queue, count, cell, horizontal) {
       const items = queue.slice(0, count);
-      const g = this.begin('q' + items.join('') + cell + horizontal + sprites.size);
+      const g = this.begin('q' + items.join('') + cell + horizontal + sprites.size + sprites.builtSkin);
       if (!g) return;
       // The first piece is a little larger.
       const weights = items.map((_, i) => (i === 0 ? 1.25 : 1));

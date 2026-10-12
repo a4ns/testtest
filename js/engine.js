@@ -690,6 +690,14 @@
         time: this.time,
         stats: Object.assign({}, this.stats),
         state: this.state,
+        lock: {
+          timer: this.lockTimer,
+          resets: this.lockResets,
+          lowestY: this.lowestY,
+          gravity: this.gravityAcc,
+          rotated: this.lastWasRotation,
+          tst: this.lastKickTST,
+        },
       };
     }
 
@@ -735,6 +743,17 @@
         }
         g.state = 'playing';
         g.lowestY = g.active.y;
+        // Lock-delay state survives a save, so save & continue can't be used
+        // to refresh move resets (and a pending T-spin keeps its credit).
+        const L = data.lock;
+        if (L && typeof L === 'object') {
+          if (typeof L.timer === 'number' && isFinite(L.timer)) g.lockTimer = clamp(L.timer, 0, g.lockDelay);
+          if (int(L.resets)) g.lockResets = clamp(L.resets, 0, g.maxLockResets);
+          if (int(L.lowestY)) g.lowestY = Math.min(L.lowestY, g.active.y);
+          if (typeof L.gravity === 'number' && isFinite(L.gravity)) g.gravityAcc = clamp(L.gravity, 0, 1);
+          g.lastWasRotation = L.rotated === true;
+          g.lastKickTST = L.tst === true;
+        }
         g.events = [];
         return g;
       } catch (e) {

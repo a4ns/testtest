@@ -148,6 +148,36 @@ button {
   background: transparent;
 }
 
+/* WebGL compositor: draws the wallpaper and the glass slabs that sit on it. */
+.glass-gl {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -2;
+  display: none;
+}
+
+:root.gl-on .glass-gl {
+  display: block;
+}
+
+:root.gl-on .wallpaper {
+  visibility: hidden;
+}
+
+:root.gl-on .glass.gl {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+:root.gl-on .glass.gl::before,
+:root.gl-on .glass.gl::after {
+  display: none;
+}
+
 .grain {
   position: fixed;
   inset: -50%;
@@ -562,7 +592,14 @@ button {
   }
 }
 
-/* While paused the stack is veiled, so a pause can't be used to plan. */
+/* While paused the stack and previews are veiled, so a pause can't be used to plan. */
+.game.is-paused .panel-hold canvas,
+.game.is-paused .panel-next canvas {
+  filter: blur(5px) saturate(0.7);
+  opacity: 0.45;
+  transition: filter 0.3s, opacity 0.3s;
+}
+
 .board-shell.is-veiled .board-canvas,
 .board-shell.is-veiled .callouts {
   filter: blur(calc(var(--cell) * 0.5)) saturate(0.7);
@@ -691,6 +728,22 @@ button {
   color: transparent;
   text-shadow: none;
   filter: drop-shadow(0 2px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 3px 8px rgba(20, 30, 80, 0.3));
+}
+
+.stat-value.is-ahead {
+  color: #30d158;
+}
+
+.stat-value.is-behind {
+  color: #ff6b61;
+}
+
+:root[data-scheme="light"] .stat-value.is-ahead {
+  color: #1a9b3d;
+}
+
+:root[data-scheme="light"] .stat-value.is-behind {
+  color: #d92d20;
 }
 
 .callout-split .callout-main {
@@ -1168,6 +1221,12 @@ button {
   flex: 1;
 }
 
+.confirm-body {
+  margin: 10px 0 0;
+  font: 500 15px/1.45 var(--font-ui);
+  color: var(--ink-2);
+}
+
 .eyebrow {
   margin: 0 0 6px;
   font: 700 12px/1 var(--font-ui);
@@ -1200,6 +1259,170 @@ button {
   text-transform: uppercase;
   color: var(--ink-2);
   text-shadow: var(--text-shadow);
+}
+
+/* Player level: a slim glass capsule with an XP meter. */
+.player {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  color: var(--ink);
+  transition: transform 0.45s var(--spring);
+}
+
+.player:hover {
+  transform: scale(1.03);
+}
+
+.player-level {
+  font: 750 13px/1 var(--font-ui);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.player-xp {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.xp-bar {
+  position: relative;
+  display: block;
+  width: 120px;
+  height: 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--well-strong);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.xp-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #64d2ff, #bf5af2);
+  box-shadow: 0 0 10px rgba(140, 120, 255, 0.6);
+  transition: width 0.9s var(--ease);
+}
+
+.res-xp {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.res-xp-row {
+  display: flex;
+  justify-content: space-between;
+  font: 700 12.5px/1 var(--font-ui);
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+
+.res-xp .xp-bar {
+  width: 100%;
+}
+
+.res-share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.btn-small {
+  min-height: 38px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.btn-small svg {
+  width: 17px;
+  height: 17px;
+}
+
+.res-share-note {
+  font: 600 12.5px/1.3 var(--font-ui);
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.res-share-note input {
+  width: 100%;
+  font: 500 12px/1.3 var(--font-ui);
+  color: var(--ink);
+  background: var(--well);
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.skins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.skin {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font: 600 12px/1 var(--font-ui);
+  color: var(--ink-2);
+}
+
+.skin canvas {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--well);
+  transition: transform 0.4s var(--spring), box-shadow 0.2s;
+}
+
+.skin[aria-pressed="true"] canvas {
+  box-shadow: 0 0 0 2.5px var(--bg), 0 0 0 5px var(--accent);
+  transform: scale(1.04);
+}
+
+.skin[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.skin:disabled {
+  cursor: default;
+}
+
+.skin:disabled canvas {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+}
+
+.skin .lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.skin .lock svg {
+  width: 11px;
+  height: 11px;
 }
 
 .mode-grid {
@@ -2288,6 +2511,43 @@ input[type="range"]:focus-visible::-moz-range-thumb {
 @media (max-height: 640px) {
   .menu {
     gap: 12px;
+  }
+}
+
+/* Landscape phones: compact cards so every mode fits without scrolling. */
+@media (max-height: 520px) {
+  .menu {
+    gap: 10px;
+  }
+
+  .mode-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .mode-daily {
+    grid-column: span 3;
+  }
+
+  .mode-card {
+    padding: 12px 14px;
+  }
+
+  .mode-desc {
+    display: none;
+  }
+
+  .mode-best {
+    margin-top: 6px;
+    padding-top: 6px;
+  }
+
+  .tagline {
+    margin-top: -6px;
+  }
+
+  .menu-hint {
+    display: none;
   }
 }
 

@@ -126,3 +126,26 @@ test('saved runs round-trip and clear', () => {
   S.clearSave('marathon');
   assert.equal(S.loadSave('marathon'), null);
 });
+
+test('corrupted bindings fall back to defaults, emptied ones stay empty', () => {
+  mem.clear();
+  localStorage.setItem('lgtetris.settings.v1', JSON.stringify({ bindings: { left: [1, 2, 'Escape'], hold: [] } }));
+  const s = S.loadSettings();
+  assert.deepEqual(s.bindings.left, ['ArrowLeft']);
+  assert.deepEqual(s.bindings.hold, []);
+});
+
+test('player levels follow the triangular XP curve', () => {
+  assert.equal(S.levelInfo(0).level, 1);
+  assert.equal(S.levelInfo(499).level, 1);
+  assert.equal(S.levelInfo(500).level, 2);
+  assert.equal(S.levelInfo(1500).level, 3);
+  assert.equal(S.levelInfo(2999).level, 3);
+  const l = S.levelInfo(2000);
+  assert.equal(l.base, 1500);
+  assert.equal(l.next, 3000);
+  assert.ok(Math.abs(l.frac - 1 / 3) < 1e-9);
+  const p = { lines: 10, tetrises: 1, tspins: 1, perfectClears: 0, games: 2, achievements: { a: 1, b: 2 } };
+  assert.equal(S.playerXP(p), 100 + 40 + 60 + 40 + 500);
+  assert.deepEqual(S.SKINS.map((s) => s.level), [1, 3, 5, 8]);
+});

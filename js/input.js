@@ -156,7 +156,11 @@
       const action = this.keyMap[e.code];
       if (!action) return false;
       e.preventDefault();
-      if (!e.repeat) this.press(action, 'k:' + e.code);
+      const src = 'k:' + e.code;
+      if (!e.repeat) this.press(action, src);
+      // A direction still held across a restart arrives only as auto-repeat
+      // events; pick it back up (never for one-shot actions like hard drop).
+      else if ((action === 'left' || action === 'right' || action === 'soft') && !this.isHeld(action)) this.press(action, src);
       return true;
     }
 

@@ -34,6 +34,9 @@ async function newPage(opts) {
   const ctx = await browser.newContext(opts);
   // Block external font requests so the test is hermetic.
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+  // Software WebGL is too slow for real players, so the game skips it; let
+  // the smoke test render the Liquid (WebGL) path anyway.
+  await ctx.addInitScript(() => localStorage.setItem('lgtetris.debug.forcegl', '1'));
   const page = await ctx.newPage();
   page.on('console', (m) => {
     if (m.type() === 'error' && !/fonts\.googleapis|ERR_FAILED|net::/.test(m.text())) problems.push(`[console] ${m.text()}`);
@@ -270,6 +273,92 @@ try {
     await shot(page, '23-game-phone-buttons');
     await ctx.close();
   }
+  // ---- progression, confirm, share, pace ---------------------------------
+  {
+    const { ctx, page } = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' });
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.addInitScript(() => {
+      // A seasoned player: level 5+ and a Sprint best with per-line times.
+      localStorage.setItem('lgtetris.profile.v1', JSON.stringify({ games: 40, lines: 600, tetrises: 30, tspins: 10, achievements: { tetris: 1 } }));
+      const lineTimes = Array.from({ length: 40 }, (_, i) => (i + 1) * 1500);
+      localStorage.setItem('lgtetris.records.v1', JSON.stringify({ sprint: [{ score: 0, lines: 40, level: 1, time: 60000, pieces: 100, date: 1, lineTimes, splits: [15000, 30000, 45000, 60000] }] }));
+    });
+    await page.goto(base, { waitUntil: 'load' });
+    await sleep(1200);
+    const lvl = await page.textContent('#player-level');
+    if (!/Level [5-9]/.test(lvl)) problems.push('player level not shown as expected: ' + lvl);
+    await shot(page, '40-menu-level');
+
+    // Skins: pick Neon, play a moment, check the sprite set switched.
+    await page.click('#screen-menu [data-open="settings"]');
+    await page.click('#tab-look');
+    await sleep(300);
+    await shot(page, '41-skins');
+    await page.click('.skin[data-value="neon"]');
+    await sleep(200);
+    const skin = await page.evaluate(() => window.TetrisRenderer.sprites.skin);
+    if (skin !== 'neon') problems.push('skin did not switch: ' + skin);
+    if (!(await page.locator('.skin[data-value="pearl"]').isDisabled())) problems.push('pearl should be locked below level 8');
+    await page.keyboard.press('Escape');
+    await sleep(300);
+
+    // Sprint pace vs the stored best.
+    await page.click('.mode-card[data-mode="sprint"]');
+    await sleep(1700);
+    await page.evaluate(() => {
+      const g = window.__tetris.app.game;
+      for (let x = 0; x < 6; x++) g.board[39][x] = 2;
+      g.active = { type: 'I', rot: 0, x: 6, y: 30 };
+    });
+    await page.keyboard.press('Space');
+    await sleep(300);
+    const pace = await page.evaluate(() => [document.getElementById('st-c-l').textContent, document.getElementById('st-c').textContent]);
+    if (pace[0] !== 'Pace' || !/^[−+]\d/.test(pace[1])) problems.push('sprint pace not shown: ' + pace.join(' '));
+    await shot(page, '42-sprint-pace');
+    await page.keyboard.press('Escape');
+    await sleep(300);
+    await page.click('#btn-quit');
+    await sleep(500);
+
+    // Marathon: save with progress, then the confirm sheet guards a new start.
+    await page.click('.mode-card[data-mode="marathon"]');
+    await sleep(1700);
+    await page.evaluate(() => {
+      const g = window.__tetris.app.game;
+      g.stats.pieces = 30;
+      g.score = 4321;
+    });
+    await page.keyboard.press('Escape');
+    await sleep(400);
+    await page.click('#btn-quit');
+    await sleep(500);
+    await page.click('.mode-card[data-mode="marathon"]');
+    await sleep(500);
+    if (!(await page.locator('#screen-confirm').evaluate((e) => e.classList.contains('is-open')))) problems.push('confirm sheet did not open');
+    await shot(page, '43-confirm');
+    await page.click('#btn-confirm-cancel');
+    await sleep(1700);
+    const cont = await page.evaluate(() => [window.__tetris.app.screen, window.__tetris.app.game && window.__tetris.app.game.score]);
+    if (cont[0] !== 'playing' || cont[1] !== 4321) problems.push('"Continue saved run" did not resume: ' + JSON.stringify(cont));
+
+    // Finish via top-out to see XP on results, then share.
+    await page.evaluate(() => {
+      const g = window.__tetris.app.game;
+      for (let y = 18; y < 40; y++) for (let x = 0; x < 10; x++) g.board[y][x] = x === y % 10 ? 0 : 1 + (x % 7);
+    });
+    await page.keyboard.press('Space');
+    await sleep(2300);
+    const xp = await page.textContent('#res-xp-gain');
+    if (!/^\+\d/.test(xp)) problems.push('xp gain missing: ' + xp);
+    await page.click('#btn-res-share');
+    await sleep(300);
+    const note = await page.textContent('#res-share-note');
+    const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+    if (!/Copied/.test(note) || !/Liquid Glass Tetris/.test(clip)) problems.push('share failed: ' + note + ' / ' + clip);
+    await shot(page, '44-results-xp');
+    await ctx.close();
+  }
+
   // ---- dark scheme -----------------------------------------------------
   {
     const { ctx, page } = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' });

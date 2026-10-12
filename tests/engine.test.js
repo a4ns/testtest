@@ -460,3 +460,16 @@ test('start level only applies to marathon', () => {
   assert.equal(new Game({ mode: 'ultra', startLevel: 7 }).level, 1);
   assert.equal(new Game({ mode: 'zen', startLevel: 7 }).level, 1);
 });
+
+test('restore keeps lock-delay state', () => {
+  const g = new Game({ seed: 4 });
+  g.start();
+  g.active = { type: 'T', rot: 0, x: 3, y: E.ROWS - 2 };
+  g.lowestY = g.active.y;
+  for (let i = 0; i < 6; i++) g.move(i % 2 ? 1 : -1);
+  g.update(200);
+  const r = Game.restore(JSON.parse(JSON.stringify(g.serialize())));
+  assert.equal(r.lockResets, g.lockResets);
+  assert.equal(r.lockTimer, g.lockTimer);
+  assert.ok(r.lockResets >= 6);
+});

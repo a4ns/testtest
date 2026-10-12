@@ -10,7 +10,7 @@
   const R = window.TetrisRenderer;
   const WP = window.TetrisWallpaper;
   const Audio = window.TetrisAudio;
-  const Lens = window.TetrisLens;
+  const Glass = window.TetrisGlass;
 
   const $ = (sel, el) => (el || document).querySelector(sel);
   const $$ = (sel, el) => Array.from((el || document).querySelectorAll(sel));
@@ -18,12 +18,10 @@
   const firstRun = !S.hasSavedSettings();
   const settings = S.loadSettings();
   if (firstRun) {
-    // Lensing re-renders every glass surface as the wallpaper moves; keep it
-    // for desktops and start phones on frosted glass (the governor in the
-    // frame loop also steps down if a desktop can't keep up).
-    const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+    // Very weak devices start on frosted glass; everyone else gets Liquid,
+    // and the governor in the frame loop steps down if a device can't keep up.
     const weak = (navigator.hardwareConcurrency || 8) <= 2 || (navigator.deviceMemory || 8) <= 2;
-    if (coarse || weak) settings.glass = 'standard';
+    if (weak) settings.glass = 'standard';
     if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) settings.reduceMotion = true;
   }
   const records = S.loadRecords();
@@ -83,10 +81,11 @@
       help: $('#screen-help'),
       records: $('#screen-records'),
       touchhelp: $('#screen-touchhelp'),
+      confirm: $('#screen-confirm'),
     },
   };
 
-  const perf = { ema: 16.7, slow: 0, degraded: false };
+  const perf = { ema: 16.7, slowMs: 0, warm: 0, degraded: false };
 
   const app = {
     screen: 'menu',
@@ -199,10 +198,16 @@
     if (meta) meta.setAttribute('content', WP.WALLPAPERS[name].base[0]);
     wall.animated = settings.animatedBg && !reduceMotion();
     perf.degraded = false;
-    perf.slow = 0;
-    els.root.setAttribute('data-glass', settings.glass);
+    perf.slowMs = 0;
+    perf.warm = 0;
+    const solidOnly = !!(window.matchMedia && matchMedia('(prefers-reduced-transparency: reduce)').matches);
+    let material = settings.glass;
+    // Liquid needs WebGL2; without it, fall back to frosted CSS glass.
+    if (material === 'high' && (!Glass.supported || solidOnly)) material = solidOnly ? 'low' : 'standard';
+    els.root.setAttribute('data-glass', material);
     els.root.classList.toggle('reduce-motion', reduceMotion());
-    Lens.setEnabled(settings.glass === 'high');
+    Glass.setScheme(light);
+    Glass.setEnabled(material === 'high');
     if (board.light !== light) layout();
   }
 
@@ -350,12 +355,13 @@
       nextView.resize(Math.round(mini * 4.4), Math.round(mini * (3.3 + 2.7 * (app.nextCount - 1))), dpr);
     }
 
-    const logoCell = clamp(Math.floor(Math.min(vw - 48, 560) / 24), 8, 22);
+    const logoCell = clamp(Math.floor(Math.min((Math.min(vw - 48, 560)) / 24, (vh * 0.14) / 5.5)), 6, 22);
     logo.resize(logoCell, dpr);
     wall.resize();
     app.hud = {};
     $$('.segmented').forEach((s) => positionLens(s, false, true));
-    Lens.refresh();
+    Glass.resize();
+    Glass.refresh();
   }
 
   // ------------------------------------------------------- screens/modals
@@ -377,18 +383,42 @@
   }
 
   // Liquid Glass surfaces grow out of the control that summoned them and
-  // melt back into it when dismissed.
+  // melt back into it. A clipping window (rounded, never squashed) travels
+  // from the control to the sheet's place while widening to the full sheet.
   const morphTokens = new WeakMap();
-  function morphTransform(from, to) {
-    const sx = Math.max(0.04, from.width / to.width);
-    const sy = Math.max(0.04, from.height / to.height);
-    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
-    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
-    return 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px) scale(' + sx.toFixed(3) + ',' + sy.toFixed(3) + ')';
-  }
+  const MORPH_EASE = 'cubic-bezier(0.2, 0.9, 0.25, 1)';
+  const MORPH_SPRING = 'cubic-bezier(0.22, 1.18, 0.36, 1)';
+
   function canMorph(sheet, origin) {
     return !!(sheet && origin && !reduceMotion() && origin.getClientRects().length && origin.getBoundingClientRect().width);
   }
+
+  /** Start/end geometry for a morph between an origin control and a sheet. */
+  function morphGeometry(sheet, origin) {
+    const to = sheet.getBoundingClientRect();
+    const from = origin.getBoundingClientRect();
+    const ix = Math.max(0, (to.width - from.width) / 2);
+    const iy = Math.max(0, (to.height - from.height) / 2);
+    const r0 = Math.min(parseFloat(getComputedStyle(origin).borderTopLeftRadius) || 0, from.width / 2, from.height / 2);
+    const R = parseFloat(getComputedStyle(sheet).borderTopLeftRadius) || 0;
+    return {
+      ok: to.width > 0 && to.height > 0,
+      move: 'translate(' + (from.left + from.width / 2 - (to.left + to.width / 2)).toFixed(1) + 'px,' + (from.top + from.height / 2 - (to.top + to.height / 2)).toFixed(1) + 'px)',
+      small: 'inset(' + iy.toFixed(1) + 'px ' + ix.toFixed(1) + 'px round ' + r0.toFixed(1) + 'px)',
+      // Slightly outside the box so the sheet's shadow isn't clipped.
+      full: 'inset(-48px round ' + (R + 48) + 'px)',
+    };
+  }
+
+  function clearMorph(sheet) {
+    sheet.style.transition = 'none';
+    sheet.style.transform = '';
+    sheet.style.clipPath = '';
+    sheet.style.opacity = '';
+    void sheet.offsetWidth;
+    sheet.style.transition = '';
+  }
+
   function morphOpen(screen, origin) {
     const sheet = screen.firstElementChild;
     if (!canMorph(sheet, origin)) return;
@@ -396,23 +426,25 @@
     morphTokens.set(sheet, token);
     sheet.style.transition = 'none';
     sheet.style.transform = 'none';
-    const to = sheet.getBoundingClientRect();
-    const from = origin.getBoundingClientRect();
-    if (!to.width || !to.height) {
-      sheet.style.transition = '';
-      sheet.style.transform = '';
+    sheet.style.clipPath = 'none';
+    const geo = morphGeometry(sheet, origin);
+    if (!geo.ok) {
+      clearMorph(sheet);
       return;
     }
-    sheet.style.transform = morphTransform(from, to);
-    sheet.style.opacity = '0.3';
+    sheet.style.transform = geo.move;
+    sheet.style.clipPath = geo.small;
+    sheet.style.opacity = '0.4';
     void sheet.offsetWidth;
-    sheet.style.transition = 'transform 0.62s cubic-bezier(0.22, 1.22, 0.36, 1), opacity 0.22s ease-out';
+    sheet.style.transition = 'transform 0.6s ' + MORPH_SPRING + ', clip-path 0.55s ' + MORPH_EASE + ', opacity 0.18s ease-out';
     sheet.style.transform = '';
+    sheet.style.clipPath = geo.full;
     sheet.style.opacity = '';
     setTimeout(() => {
-      if (morphTokens.get(sheet) === token) sheet.style.transition = '';
-    }, 700);
+      if (morphTokens.get(sheet) === token) clearMorph(sheet);
+    }, 650);
   }
+
   function morphClose(screen, origin) {
     const sheet = screen.firstElementChild;
     if (!canMorph(sheet, origin)) return;
@@ -421,20 +453,16 @@
     const current = sheet.style.transform;
     sheet.style.transition = 'none';
     sheet.style.transform = 'none';
-    const to = sheet.getBoundingClientRect();
-    const from = origin.getBoundingClientRect();
+    const geo = morphGeometry(sheet, origin);
     sheet.style.transform = current;
+    if (!sheet.style.clipPath) sheet.style.clipPath = geo.full;
     void sheet.offsetWidth;
-    sheet.style.transition = 'transform 0.34s cubic-bezier(0.45, 0, 0.75, 1), opacity 0.28s ease-in';
-    sheet.style.transform = morphTransform(from, to);
+    sheet.style.transition = 'transform 0.34s ' + MORPH_EASE + ', clip-path 0.34s ' + MORPH_EASE + ', opacity 0.3s ease-in';
+    sheet.style.transform = geo.move;
+    sheet.style.clipPath = geo.small;
     sheet.style.opacity = '0';
     setTimeout(() => {
-      if (morphTokens.get(sheet) !== token) return;
-      sheet.style.transition = 'none';
-      sheet.style.transform = '';
-      sheet.style.opacity = '';
-      void sheet.offsetWidth;
-      sheet.style.transition = '';
+      if (morphTokens.get(sheet) === token) clearMorph(sheet);
     }, 400);
   }
 
@@ -446,6 +474,7 @@
     els.screens.results.classList.toggle('is-open', name === 'results');
     els.game.classList.toggle('is-hidden', name === 'menu');
     els.boardShell.classList.toggle('is-veiled', name === 'paused');
+    els.game.classList.toggle('is-paused', name === 'paused');
     Audio.duck(name === 'paused');
     updateInert();
     if (toastsBlocked()) dismissToast();
@@ -459,7 +488,6 @@
     if (name === 'results' && prev !== 'results') morphOpen(els.screens.results, els.boardShell);
     if (name === 'paused') focusLater($('#btn-resume'));
     else if (name === 'results') focusLater($('#btn-res-again'));
-    Lens.refresh();
   }
 
   function focusLater(el) {
@@ -491,7 +519,6 @@
     morphOpen(el, app.modalOrigin);
     requestAnimationFrame(() => {
       $$('.segmented', el).forEach((s) => positionLens(s));
-      Lens.refresh();
     });
     focusLater($('[role="tab"][aria-selected="true"]', el) || $('button', el));
     Audio.play('select');
@@ -541,7 +568,76 @@
     }
   }
 
+  // ------------------------------------------------------------- progression
+
+  function playerLevel() {
+    return S.levelInfo(S.playerXP(profile));
+  }
+
+  /** The chosen block material if it's unlocked, otherwise Jelly. */
+  function effectiveSkin() {
+    const skin = S.SKINS.find((k) => k.id === settings.skin);
+    return skin && playerLevel().level >= skin.level ? skin.id : 'jelly';
+  }
+
+  function applySkin() {
+    const skin = effectiveSkin();
+    if (R.sprites.skin === skin) return;
+    R.sprites.skin = skin;
+    layout();
+  }
+
+  function renderPlayer() {
+    const info = playerLevel();
+    $('#player-level').textContent = 'Level ' + info.level;
+    $('#player-xp').textContent = fmtInt(info.xp - info.base) + ' / ' + fmtInt(info.next - info.base) + ' XP';
+    $('#player-fill').style.width = (info.frac * 100).toFixed(1) + '%';
+    $('#player').setAttribute('aria-label', 'Level ' + info.level + ', ' + fmtInt(info.xp) + ' XP. Open records');
+  }
+
+  function renderSkins() {
+    const box = $('#skins');
+    if (!box) return;
+    box.textContent = '';
+    const level = playerLevel().level;
+    const current = effectiveSkin();
+    for (const skin of S.SKINS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'skin';
+      b.dataset.value = skin.id;
+      const locked = level < skin.level;
+      b.disabled = locked;
+      b.setAttribute('aria-pressed', String(skin.id === current));
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 112;
+      const g = cv.getContext('2d');
+      const tile = R.makeTile('#BF5AF2', 64, skin.id);
+      // A tiny T piece in the chosen material.
+      [[24, 16], [8, 48], [40, 48], [72, 48]].forEach(([x, y]) => g.drawImage(tile, x, y + 8, 32, 32));
+      b.appendChild(cv);
+      const label = document.createElement('span');
+      if (locked) {
+        label.className = 'lock';
+        label.innerHTML = '<svg aria-hidden="true"><use href="#i-lock"/></svg>';
+        label.appendChild(document.createTextNode('Level ' + skin.level));
+        b.setAttribute('aria-label', skin.name + ' blocks, unlocks at level ' + skin.level);
+      } else {
+        label.textContent = skin.name;
+      }
+      b.appendChild(label);
+      b.addEventListener('click', () => {
+        settings.skin = skin.id;
+        $$('.skin', box).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        commit('skin');
+        Audio.play('ui');
+      });
+      box.appendChild(b);
+    }
+  }
+
   function refreshMenu() {
+    renderPlayer();
     for (const m of S.MODE_ORDER) {
       if (m === 'daily') continue;
       const best = S.bestRun(records, m);
@@ -568,7 +664,15 @@
     }
 
     // Continue banner for the most recent saved run.
-    const saves = SAVE_MODES.map((m) => ({ m, d: S.loadSave(m) })).filter((x) => x.d && x.d.game && x.d.game.state === 'playing');
+    const saves = SAVE_MODES.map((m) => ({ m, d: S.loadSave(m) })).filter((x) => {
+      if (!x.d) return false;
+      // Drop saves that can't be restored (tampered, or from an older build).
+      if (!E.Game.restore(x.d.game) || !num(x.d.game.stats && x.d.game.stats.pieces)) {
+        S.clearSave(x.m);
+        return false;
+      }
+      return true;
+    });
     saves.sort((a, b) => num(b.d.savedAt) - num(a.d.savedAt));
     const banner = $('#continue');
     if (saves.length) {
@@ -591,6 +695,7 @@
   function saveRun(force) {
     const g = app.game;
     if (!g || g.state !== 'playing' || SAVE_MODES.indexOf(g.mode) === -1) return;
+    if (!g.stats.pieces) return;
     const now = performance.now();
     if (!force && now - lastSaveAt < 2000) return;
     lastSaveAt = now;
@@ -673,7 +778,11 @@
     app.hardDropping = false;
     app.runUnlocks = (extra && extra.unlocks) || [];
     app.splits = [];
+    app.lineTimes = [];
     app.dailyKey = (extra && extra.dailyKey) || null;
+    // Sprint pace: compare against the best run's time at every line.
+    const pb = g.mode === 'sprint' ? S.bestRun(records, 'sprint') : null;
+    app.pbLines = pb && Array.isArray(pb.lineTimes) && pb.lineTimes.length >= 40 ? pb.lineTimes : null;
     board.reset();
     els.callouts.textContent = '';
     input.releaseAll();
@@ -742,6 +851,64 @@
 
   function restart() {
     startGame(app.mode, true);
+  }
+
+  // -- confirmation before throwing away a run worth keeping
+
+  let confirmState = null;
+  function confirmAction(opts) {
+    confirmState = opts;
+    $('#confirm-title').textContent = opts.title;
+    $('#confirm-body').textContent = opts.body;
+    $('#btn-confirm-ok').textContent = opts.ok;
+    $('#btn-confirm-cancel').textContent = opts.cancel;
+    openModal('confirm', () => {
+      confirmState = null;
+    }, opts.origin);
+  }
+
+  function runSummary(level, score, time) {
+    return 'Level ' + num(level) + ' · ' + fmtInt(num(score)) + ' points · ' + fmtTime(num(time));
+  }
+
+  /** A run is worth protecting once a few pieces are down. */
+  function hasProgress(pieces) {
+    return num(pieces) >= 5;
+  }
+
+  function requestStart(mode, origin) {
+    const save = SAVE_MODES.indexOf(mode) !== -1 && S.loadSave(mode);
+    const g = save && save.game;
+    if (g && hasProgress(g.stats && g.stats.pieces)) {
+      confirmAction({
+        title: 'Start a new ' + MODE_INFO[mode].name + '?',
+        body: 'Your saved run (' + runSummary(g.level, g.score, g.time) + ') will be lost.',
+        ok: 'Start new',
+        cancel: 'Continue saved run',
+        origin,
+        onOk: () => startGame(mode),
+        onCancel: () => continueRun(mode),
+      });
+      return;
+    }
+    startGame(mode);
+  }
+
+  function requestRestart(origin) {
+    const g = app.game;
+    if (g && g.state === 'playing' && SAVE_MODES.indexOf(g.mode) !== -1 && hasProgress(g.stats.pieces)) {
+      confirmAction({
+        title: 'Restart this run?',
+        body: 'Your progress (' + runSummary(g.level, g.score, g.time) + ') will be lost.',
+        ok: 'Restart',
+        cancel: 'Keep playing',
+        origin,
+        onOk: () => restart(),
+        onCancel: () => {},
+      });
+      return;
+    }
+    restart();
   }
 
   let countdownToken = 0;
@@ -831,6 +998,7 @@
 
   function finalizeRun(g, ev) {
     const st = g.stats;
+    const xpBefore = S.playerXP(profile);
     const run = {
       score: g.score,
       lines: g.lines,
@@ -840,7 +1008,10 @@
       date: Date.now(),
     };
     const prevBest = S.bestRun(records, g.mode);
-    if (g.mode === 'sprint' && ev.result === 'cleared') run.splits = app.splits.slice(0, 3).concat([run.time]);
+    if (g.mode === 'sprint' && ev.result === 'cleared') {
+      run.splits = app.splits.slice(0, 3).concat([run.time]);
+      if (app.lineTimes.length >= 40) run.lineTimes = app.lineTimes.slice(0, 40);
+    }
     if (g.mode === 'daily') run.day = app.dailyKey || S.dayKey();
     const eligible = g.mode === 'sprint' ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
     const rank = eligible ? S.addRecord(records, g.mode, run) : 0;
@@ -849,7 +1020,7 @@
 
     addLifetime(gameTotals(g));
     checkAchievements(true, ev);
-    return { run, rank, prevBest, result: ev.result, eligible };
+    return { run, rank, prevBest, result: ev.result, eligible, xpBefore, xpAfter: S.playerXP(profile) };
   }
 
   function showResults() {
@@ -947,11 +1118,95 @@
       chip.title = a.desc;
       unlocks.appendChild(chip);
     }
-    unlocks.hidden = !app.runUnlocks.length;
-    if (app.runUnlocks.length) setTimeout(() => Audio.play('achievement'), 450);
+    // XP gained this run, with level-ups and newly unlocked block materials.
+    const before = S.levelInfo(info.xpBefore);
+    const after = S.levelInfo(info.xpAfter);
+    const gain = info.xpAfter - info.xpBefore;
+    let extra = 0;
+    if (after.level > before.level) {
+      const chip = document.createElement('span');
+      chip.className = 'unlock-chip';
+      chip.innerHTML = '<svg aria-hidden="true"><use href="#i-star"/></svg>';
+      chip.appendChild(document.createTextNode('Level ' + after.level + '!'));
+      unlocks.appendChild(chip);
+      extra++;
+      for (const skin of S.SKINS) {
+        if (skin.level > before.level && skin.level <= after.level) {
+          const c2 = document.createElement('span');
+          c2.className = 'unlock-chip';
+          c2.innerHTML = '<svg aria-hidden="true"><use href="#i-sliders"/></svg>';
+          c2.appendChild(document.createTextNode('New blocks: ' + skin.name));
+          c2.title = 'Choose it in Settings → Look';
+          unlocks.appendChild(c2);
+        }
+      }
+    }
+    unlocks.hidden = !app.runUnlocks.length && !extra;
+    if (app.runUnlocks.length || extra) setTimeout(() => Audio.play('achievement'), 450);
+    $('#res-xp-level').textContent = 'Level ' + after.level;
+    $('#res-xp-gain').textContent = '+' + fmtInt(gain) + ' XP';
+    const fill = $('#res-xp-fill');
+    fill.style.transition = 'none';
+    fill.style.width = (after.level > before.level ? 0 : before.frac * 100).toFixed(1) + '%';
+    void fill.offsetWidth;
+    fill.style.transition = '';
+    setTimeout(() => {
+      fill.style.width = (after.frac * 100).toFixed(1) + '%';
+    }, 350);
+    $('#res-share-note').textContent = '';
+    applySkin();
     renderBoardList($('#res-board'), mode, info.eligible ? info.run : null, 5);
     setScreen('results');
     app.resultsShownAt = performance.now();
+  }
+
+  function shareText() {
+    const info = app.endInfo;
+    const g = app.game;
+    if (!info || !g) return '';
+    const mode = MODE_INFO[g.mode].name + (g.mode === 'daily' && info.run.day ? ' · ' + prettyDay(info.run.day) : '');
+    let main;
+    if (g.mode === 'sprint') main = info.result === 'cleared' ? '40 lines in ' + fmtTime(g.time, true) : g.lines + '/40 lines';
+    else main = fmtInt(g.score) + ' points · ' + g.lines + ' lines';
+    const out = ['Liquid Glass Tetris · ' + mode, main];
+    const st = g.stats;
+    const feats = [];
+    if (st.tetrises) feats.push(st.tetrises + ' Tetris' + (st.tetrises > 1 ? 'es' : ''));
+    if (st.tspins + st.tspinMinis) feats.push(st.tspins + st.tspinMinis + ' T-Spin' + (st.tspins + st.tspinMinis > 1 ? 's' : ''));
+    if (st.perfectClears) feats.push(st.perfectClears + ' Perfect Clear' + (st.perfectClears > 1 ? 's' : ''));
+    if (feats.length) out.push(feats.join(' · '));
+    if (g.mode === 'daily' && daily.streak > 1) out.push(daily.streak + '-day streak');
+    return out.join('\n');
+  }
+
+  /** Share sheet on phones, clipboard elsewhere, selectable text as a last resort. */
+  async function shareResult() {
+    const text = shareText();
+    const note = $('#res-share-note');
+    if (!text) return;
+    if (navigator.share && app.coarse) {
+      try {
+        await navigator.share({ text });
+        note.textContent = 'Shared';
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      note.textContent = 'Copied to clipboard';
+      Audio.play('select');
+    } catch (e) {
+      note.textContent = '';
+      const field = document.createElement('input');
+      field.readOnly = true;
+      field.value = text.replace(/\n/g, ' · ');
+      field.setAttribute('aria-label', 'Result text');
+      note.appendChild(field);
+      field.focus();
+      field.select();
+    }
   }
 
   // ------------------------------------------------------- event routing
@@ -1033,6 +1288,7 @@
   function sprintSplits() {
     const g = app.game;
     if (!g || g.mode !== 'sprint') return;
+    while (app.lineTimes.length < Math.min(40, g.lines)) app.lineTimes.push(Math.round(g.time));
     while (app.splits.length < 3 && g.lines >= (app.splits.length + 1) * 10) {
       const idx = app.splits.length;
       const t = Math.round(g.time);
@@ -1197,7 +1453,7 @@
   }
 
   function toastsBlocked() {
-    return !!app.modal || app.screen === 'playing' || app.screen === 'countdown' || app.screen === 'ending' || app.screen === 'results';
+    return app.screen !== 'menu' || !!app.modal;
   }
 
   function pumpToasts() {
@@ -1245,6 +1501,7 @@
     els.st.aL.textContent = L[1];
     els.st.bL.textContent = L[2];
     els.st.cL.textContent = L[3];
+    els.st.c.classList.remove('is-ahead', 'is-behind');
     app.hud = {};
   }
 
@@ -1262,12 +1519,19 @@
     let frac;
     let ringVal;
     let ringLabel;
+    let pace = null;
     switch (g.mode) {
       case 'sprint': {
         main = fmtTime(g.time, true);
         a = Math.min(g.lines, 40) + '/40';
         b = fmtInt(g.stats.pieces);
         c = pps;
+        pace = null;
+        if (app.pbLines && app.lineTimes.length) {
+          const n = app.lineTimes.length;
+          pace = app.lineTimes[n - 1] - app.pbLines[n - 1];
+          c = (pace <= 0 ? '−' : '+') + (Math.abs(pace) / 1000).toFixed(2);
+        }
         const rem = Math.max(0, 40 - g.lines);
         frac = Math.min(1, g.lines / 40);
         ringVal = String(rem);
@@ -1302,6 +1566,15 @@
     setText(els.st.a, 'a', a);
     setText(els.st.b, 'b', b);
     setText(els.st.c, 'c', c);
+    if (g.mode === 'sprint') {
+      setText(els.st.cL, 'cL', pace === null ? 'PPS' : 'Pace');
+      const cls = pace === null ? '' : pace <= 0 ? 'ahead' : 'behind';
+      if (app.hud.paceCls !== cls) {
+        app.hud.paceCls = cls;
+        els.st.c.classList.toggle('is-ahead', cls === 'ahead');
+        els.st.c.classList.toggle('is-behind', cls === 'behind');
+      }
+    }
     setText(els.goalValue, 'rv', ringVal);
     setText(els.goalLabel, 'rl', ringLabel);
     const off = (100 - clamp(frac, 0, 1) * 100).toFixed(1);
@@ -1324,19 +1597,23 @@
 
   // ---------------------------------------------------------- frame loop
 
-  /** If the glass can't hold ~40 fps during play, quietly step the material
-   * down (Liquid → Frosted → Solid) for this session. */
+  /** If the glass can't hold ~36 fps for a couple of seconds, quietly step
+   * the material down (Liquid → Frosted → Solid) for this session. */
   function governFrameRate(dt) {
     const material = els.root.getAttribute('data-glass');
-    if (material === 'low') return;
-    perf.ema = perf.ema * 0.95 + dt * 0.05;
-    perf.slow = perf.ema > 25 ? perf.slow + 1 : Math.max(0, perf.slow - 2);
-    if (perf.slow <= 240) return;
-    perf.slow = 0;
+    if (material === 'low' || document.hidden || app.forceGL) return;
+    // Ignore the first second after start-up or a change of material.
+    perf.warm += dt;
+    if (perf.warm < 1000) return;
+    perf.ema = perf.ema * 0.9 + dt * 0.1;
+    perf.slowMs = perf.ema > 28 ? perf.slowMs + dt : Math.max(0, perf.slowMs - dt * 0.5);
+    if (perf.slowMs < 2500) return;
+    perf.slowMs = 0;
+    perf.warm = 0;
     perf.ema = 16.7;
     perf.degraded = true;
     if (material === 'high') {
-      Lens.setEnabled(false);
+      Glass.setEnabled(false);
       els.root.setAttribute('data-glass', 'standard');
     } else {
       els.root.setAttribute('data-glass', 'low');
@@ -1351,14 +1628,12 @@
 
     input.update(dt);
     if (app.screen === 'countdown' && app.countdown) updateCountdown(now);
-    if (app.screen === 'playing' && app.game) {
-      app.game.update(dt, input.softHeld);
-      governFrameRate(dt);
-    }
+    if (app.screen === 'playing' && app.game) app.game.update(dt, input.softHeld);
+    governFrameRate(dt);
     processEvents(now);
     if (app.screen === 'ending' && now >= app.endAt) showResults();
 
-    wall.render(now, dt);
+    const bgDrawn = wall.render(now, dt);
     if (app.screen === 'menu') {
       logo.render(now, reduceMotion());
     } else {
@@ -1366,6 +1641,9 @@
       updateHud(dt);
       updateShake(dt);
     }
+    // Last, after all DOM writes: the compositor reads element positions.
+    const danger = app.screen !== 'menu' && app.hud.danger ? 0.55 + 0.45 * Math.sin(now / 210) : 0;
+    Glass.render(bgDrawn, danger);
   }
 
   // ------------------------------------------------------------- settings UI
@@ -1418,7 +1696,16 @@
       positionLens(seg);
     });
     $$('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === settings.wallpaper)));
+    const note = $('#glass-note');
+    if (note) {
+      let text = 'Real refraction, rendered on the GPU';
+      if (settings.glass === 'high' && Glass.software) text = 'Liquid needs GPU acceleration here, so Frosted is used';
+      else if (settings.glass === 'high' && !Glass.supported) text = 'Liquid needs WebGL 2, so Frosted is used';
+      else if (perf.degraded) text = 'Lowered automatically to keep play smooth. Pick a material to retry.';
+      note.textContent = text;
+    }
     renderBindings();
+    renderSkins();
   }
 
   let sfxPreviewAt = 0;
@@ -1456,6 +1743,9 @@
         break;
       case 'sdf':
         if (app.game) app.game.softDropFactor = softDropFactor();
+        break;
+      case 'skin':
+        applySkin();
         break;
     }
   }
@@ -1497,8 +1787,7 @@
     if (panel) {
       requestAnimationFrame(() => {
         $$('.segmented', panel).forEach((s) => positionLens(s));
-        Lens.refresh();
-      });
+          });
     }
   }
 
@@ -1812,7 +2101,10 @@
     const life = $('#lifetime');
     life.textContent = '';
     const hours = profile.timePlayed / 3600000;
+    const lvl = playerLevel();
     const items = [
+      ['Player level', String(lvl.level)],
+      ['Total XP', fmtInt(lvl.xp)],
       ['Games', fmtInt(profile.games)],
       ['Lines', fmtInt(profile.lines)],
       ['Pieces', fmtInt(profile.pieces)],
@@ -1894,7 +2186,7 @@
     if (!dir) {
       if ((e.code === 'Enter' || e.code === 'NumpadEnter') && (!document.activeElement || document.activeElement === document.body)) {
         e.preventDefault();
-        if (app.screen === 'menu' && !app.modal) startGame(app.mode);
+        if (app.screen === 'menu' && !app.modal) requestStart(app.mode);
         else focusFirst();
       }
       return;
@@ -1955,7 +2247,7 @@
         }
         if (k === 'KeyR' && !e.repeat) {
           e.preventDefault();
-          restart();
+          requestRestart($('#btn-restart'));
           return;
         }
         navKeys(e);
@@ -2055,6 +2347,7 @@
           pending = false;
           els.root.style.setProperty('--lx', lx + 'px');
           els.root.style.setProperty('--ly', ly + 'px');
+          Glass.setLight(lx, ly);
         });
       },
       { passive: true }
@@ -2076,8 +2369,11 @@
       pending = true;
       requestAnimationFrame(() => {
         pending = false;
-        els.root.style.setProperty('--lx', Math.round((0.5 + gx * 0.6) * window.innerWidth) + 'px');
-        els.root.style.setProperty('--ly', Math.round((0.15 + gy * 0.5) * window.innerHeight) + 'px');
+        const tx = Math.round((0.5 + gx * 0.6) * window.innerWidth);
+        const ty = Math.round((0.15 + gy * 0.5) * window.innerHeight);
+        els.root.style.setProperty('--lx', tx + 'px');
+        els.root.style.setProperty('--ly', ty + 'px');
+        Glass.setLight(tx, ty);
       });
     });
   }
@@ -2102,7 +2398,7 @@
       card.addEventListener('click', () => {
         unlockAudio();
         Audio.play('select');
-        startGame(card.dataset.mode);
+        requestStart(card.dataset.mode, card);
       });
       card.addEventListener('focus', () => {
         app.mode = card.dataset.mode;
@@ -2117,7 +2413,19 @@
     );
     els.btnPause.addEventListener('click', () => pause());
     $('#btn-resume').addEventListener('click', () => resume());
-    $('#btn-restart').addEventListener('click', () => restart());
+    $('#btn-restart').addEventListener('click', (e) => requestRestart(e.currentTarget));
+    $('#btn-confirm-ok').addEventListener('click', () => {
+      const st = confirmState;
+      confirmState = null;
+      closeModal(true);
+      if (st) st.onOk();
+    });
+    $('#btn-confirm-cancel').addEventListener('click', () => {
+      const st = confirmState;
+      confirmState = null;
+      closeModal(true);
+      if (st) st.onCancel();
+    });
     $('#btn-quit').addEventListener('click', () => {
       if (app.mode === 'zen' && app.game && app.game.state === 'playing') {
         app.game.finish('ended');
@@ -2128,6 +2436,7 @@
       }
     });
     $('#btn-res-again').addEventListener('click', () => restart());
+    $('#btn-res-share').addEventListener('click', () => shareResult());
     $('#btn-continue').addEventListener('click', () => {
       unlockAudio();
       Audio.play('select');
@@ -2204,6 +2513,16 @@
 
   function boot() {
     makeGrain();
+    let forceGL = false;
+    try {
+      forceGL = localStorage.getItem('lgtetris.debug.forcegl') === '1';
+    } catch (e) {
+      forceGL = false;
+    }
+    // Debug: lets headless tests (software WebGL) exercise the Liquid path.
+    app.forceGL = forceGL;
+    Glass.init($('#glass-gl'), [els.wallpaper, $('#wallpaper-fx')], { allowSoftware: forceGL });
+    Glass.onContextLost(() => applyLook());
     applyLook();
     applyAudio();
     bindSettingsUI();
@@ -2211,6 +2530,7 @@
     setupFullscreen();
     setupPointerLight();
     layout();
+    applySkin();
     setupTilt();
     refreshMenu();
     setScreen('menu');

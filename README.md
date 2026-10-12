@@ -1,9 +1,10 @@
 # Liquid Glass Tetris
 
-A falling-block puzzle game built from Apple-style Liquid Glass: translucent
-slabs with lit rims, specular sheens that follow your pointer, real edge
-lensing on Chromium browsers, glass-jewel blocks, and a living wallpaper that
-pulses with every clear.
+A falling-block puzzle game built from Apple-style Liquid Glass: clear glass
+slabs rendered on the GPU with real edge refraction, colour dispersion, a thin
+specular rim that follows your pointer (or your phone's tilt) and a tint that
+adapts to what's behind it; sheets that grow out of the button you pressed;
+glass-jewel blocks; and a living wallpaper that pulses with every clear.
 
 No build step and no dependencies. Open `index.html` in a browser and play.
 
@@ -46,8 +47,10 @@ Y 180°, bumpers hold, Start pause).
 - **Sound:** all effects and both soundtracks (the ambient *Glass Garden* and a
   glassy *Korobeiniki*) are synthesized live with the Web Audio API. Combos
   climb a pentatonic scale; the music speeds up with the level.
-- **Progression:** personal top-10 per mode, 23 achievements, daily streaks, lifetime stats,
-  resumable Marathon/Zen runs, one-key instant retry (R).
+- **Progression:** player levels and XP, unlockable block materials (Crystal, Neon,
+  Pearl), personal top-10 per mode, 23 achievements, daily streaks, lifetime stats,
+  resumable Marathon/Zen runs, Sprint live pace vs your best, one-key instant retry (R),
+  shareable results.
 - **Layouts** for desktop, portrait phones and landscape phones, with touch gestures or buttons.
 - **Installable PWA** with offline support (when served over HTTPS).
 - **Accessible:** full keyboard and gamepad navigation, reduced-motion and
@@ -70,7 +73,7 @@ Code map:
 | `js/engine.js` | Pure rules engine (also runs in Node for tests) |
 | `js/renderer.js` | Glass tile sprites, playfield, effects, previews, logo |
 | `js/wallpaper.js` | Animated wallpaper behind the glass |
-| `js/lens.js` | Liquid Glass edge refraction (SVG displacement in `backdrop-filter`) |
+| `js/glass-gl.js` | WebGL2 Liquid Glass compositor: wallpaper + refracting glass slabs |
 | `js/audio.js` | Synthesized sound effects and music |
 | `js/input.js` | Keyboard (DAS/ARR), touch gestures and buttons, gamepad |
 | `js/storage.js` | Settings, records, achievements (localStorage) |

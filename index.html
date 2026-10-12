@@ -37,8 +37,8 @@
   <body>
     <canvas id="wallpaper" class="wallpaper" aria-hidden="true"></canvas>
     <canvas id="wallpaper-fx" class="wallpaper wallpaper-fx" aria-hidden="true"></canvas>
+    <canvas id="glass-gl" class="glass-gl" aria-hidden="true"></canvas>
     <div class="grain" id="grain" aria-hidden="true"></div>
-    <svg class="svg-defs" aria-hidden="true" focusable="false"><defs id="lens-defs"></defs></svg>
 
     <!-- Icon sprite -->
     <svg class="svg-defs" aria-hidden="true" focusable="false">
@@ -57,6 +57,8 @@
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" fill="currentColor" /></symbol>
       <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /><circle cx="12" cy="15" r="1.8" fill="currentColor" /></symbol>
       <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 2.5c.6 3.2-1.2 4.9-2.8 6.6C7.6 10.8 6 12.6 6 15.3A6 6 0 0 0 12 21.5a6 6 0 0 0 6-6.2c0-2.6-1.3-4.3-2.4-5.6-.2 1.6-.9 2.6-2 3.1.4-3.6-.2-7.4-1.6-10.3z" fill="currentColor" /></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3.5M7.5 8 12 3.5 16.5 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 11H6.5A2.5 2.5 0 0 0 4 13.5v4A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5v-4A2.5 2.5 0 0 0 17.5 11H16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="currentColor" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2" /></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.2 2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.5l-5.4 2.9 1.2-5.9-4.4-4.1 6-.7z" fill="currentColor" /></symbol>
       <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
       <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
@@ -137,6 +139,11 @@
         <h1 class="visually-hidden" id="menu-title">Liquid Glass Tetris</h1>
         <canvas id="logo-canvas" class="logo" aria-hidden="true"></canvas>
         <p class="tagline">Liquid Glass</p>
+        <button class="glass player" type="button" id="player" data-open="records" aria-describedby="player-xp">
+          <span class="player-level" id="player-level">Level 1</span>
+          <span class="xp-bar" aria-hidden="true"><i id="player-fill"></i></span>
+          <span class="player-xp num" id="player-xp">0 / 500 XP</span>
+        </button>
         <div class="glass continue" id="continue" hidden>
           <button class="continue-main" type="button" id="btn-continue">
             <span class="continue-icon" aria-hidden="true"><svg><use href="#i-play" /></svg></span>
@@ -206,9 +213,17 @@
         <h2 id="res-title">Game Over</h2>
         <div class="res-main"><span class="num" id="res-main">0</span><span class="res-main-label" id="res-main-label">points</span></div>
         <div id="res-badge-slot"></div>
-        <div class="res-unlocks" id="res-unlocks" aria-label="Achievements unlocked this run" hidden></div>
+        <div class="res-unlocks" id="res-unlocks" aria-label="Unlocked this run" hidden></div>
+        <div class="res-xp" id="res-xp">
+          <div class="res-xp-row"><span id="res-xp-level">Level 1</span><span class="num" id="res-xp-gain">+0 XP</span></div>
+          <div class="xp-bar" aria-hidden="true"><i id="res-xp-fill"></i></div>
+        </div>
         <dl class="res-stats" id="res-stats"></dl>
         <ol class="board-list" id="res-board" aria-label="Personal leaderboard"></ol>
+        <div class="res-share">
+          <button class="btn glass btn-small" type="button" id="btn-res-share"><svg aria-hidden="true"><use href="#i-share" /></svg>Share result</button>
+          <span class="res-share-note" id="res-share-note" aria-live="polite"></span>
+        </div>
         <div class="sheet-actions row">
           <button class="btn glass" type="button" id="btn-res-menu"><svg aria-hidden="true"><use href="#i-home" /></svg>Menu</button>
           <button class="btn btn-primary glass" type="button" id="btn-res-again"><svg aria-hidden="true"><use href="#i-restart" /></svg>Play again</button>
@@ -326,12 +341,15 @@
         </div>
 
         <div class="tab-panel" role="tabpanel" id="panel-look" aria-labelledby="tab-look" hidden>
+          <p class="group-title">Blocks</p>
+          <div class="skins" id="skins"></div>
+          <p class="note" id="skins-note">Level up to unlock more materials. Lines, Tetrises, T-Spins and achievements all earn XP.</p>
           <p class="group-title">Wallpaper</p>
           <div class="swatches" id="swatches"></div>
           <p class="group-title">Glass</p>
           <div class="rows">
             <div class="row">
-              <div class="row-label"><span id="lbl-glass">Material</span><small>Liquid adds lensing on Chromium browsers</small></div>
+              <div class="row-label"><span id="lbl-glass">Material</span><small id="glass-note">Liquid renders real refraction with WebGL</small></div>
               <div class="segmented" data-seg="glass" aria-labelledby="lbl-glass">
                 <span class="seg-lens" aria-hidden="true"></span>
                 <button type="button" data-value="high">Liquid</button>
@@ -392,6 +410,7 @@
           <p><strong>Back-to-Back</strong>: chain Tetrises and T-Spins without a plain clear in between for a 1.5× bonus. <strong>Combos</strong>: clear lines with consecutive pieces for +50 × combo × level.</p>
           <p><strong>Perfect Clear</strong>: empty the whole field for a huge bonus. Hard drops earn 2 points per row, soft drops 1.</p>
           <p><strong>Hold</strong> a piece for later, once per drop. The ghost shows where the piece will land.</p>
+          <p><strong>Levels</strong>: everything you clear earns XP. Level up to unlock new block materials in Settings → Look.</p>
           <p><strong>Daily Challenge</strong>: a new two-minute run every day with the same pieces for everyone. Play on consecutive days to build a streak. <strong>Sprint</strong> shows your pace against your best at every 10 lines.</p>
         </div>
       </div>
@@ -448,6 +467,18 @@
       </div>
     </section>
 
+    <!-- ========================================================= CONFIRM -->
+    <section class="screen modal" id="screen-confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <div class="glass sheet sheet-sm">
+        <h2 id="confirm-title">Start a new run?</h2>
+        <p class="confirm-body" id="confirm-body"></p>
+        <div class="sheet-actions">
+          <button class="btn btn-primary glass" type="button" id="btn-confirm-cancel">Continue run</button>
+          <button class="btn glass btn-danger" type="button" id="btn-confirm-ok">Start new</button>
+        </div>
+      </div>
+    </section>
+
     <div class="toasts" id="toasts" aria-live="polite"></div>
 
     <!--build:scripts-->
@@ -457,7 +488,7 @@
     <script src="js/renderer.js"></script>
     <script src="js/wallpaper.js"></script>
     <script src="js/input.js"></script>
-    <script src="js/lens.js"></script>
+    <script src="js/glass-gl.js"></script>
     <script src="js/app.js"></script>
     <!--/build:scripts-->
   </body>

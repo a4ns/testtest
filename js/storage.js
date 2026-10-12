@@ -63,8 +63,32 @@
     animatedBg: true,
     touch: 'gestures',
     haptics: true,
+    skin: 'jelly',
     bindings: DEFAULT_BINDINGS,
   };
+
+  // Block materials; all but the first unlock with player level.
+  const SKINS = [
+    { id: 'jelly', name: 'Jelly', level: 1 },
+    { id: 'crystal', name: 'Crystal', level: 3 },
+    { id: 'neon', name: 'Neon', level: 5 },
+    { id: 'pearl', name: 'Pearl', level: 8 },
+  ];
+
+  /** Experience earned from everything you've done, ever. */
+  function playerXP(p) {
+    const ach = p && p.achievements ? Object.keys(p.achievements).length : 0;
+    return Math.round(p.lines * 10 + p.tetrises * 40 + p.tspins * 60 + p.perfectClears * 300 + p.games * 20 + ach * 250);
+  }
+
+  /** Level n is reached at 250·n·(n−1) XP: 0, 500, 1500, 3000, 5000… */
+  function levelInfo(xp) {
+    let n = 1;
+    while (250 * (n + 1) * n <= xp && n < 999) n++;
+    const base = 250 * n * (n - 1);
+    const next = 250 * (n + 1) * n;
+    return { level: n, xp, base, next, frac: (xp - base) / (next - base) };
+  }
 
   const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'zen', 'daily'];
 
@@ -118,9 +142,12 @@
 
   function sanitizeBindings(b) {
     const out = {};
+    const ok = (k) => typeof k === 'string' && /^[A-Za-z0-9]+$/.test(k) && RESERVED_KEYS.indexOf(k) === -1;
     for (const a of ACTIONS) {
-      const list = isPlainObject(b) && Array.isArray(b[a]) ? b[a] : DEFAULT_BINDINGS[a];
-      out[a] = list.filter((k) => typeof k === 'string' && RESERVED_KEYS.indexOf(k) === -1).slice(0, 2);
+      const stored = isPlainObject(b) && Array.isArray(b[a]) ? b[a] : DEFAULT_BINDINGS[a];
+      const list = stored.filter(ok).slice(0, 2);
+      // An intentionally emptied action stays empty; a corrupted one gets its defaults back.
+      out[a] = list.length || !stored.length ? list : DEFAULT_BINDINGS[a].slice();
     }
     return out;
   }
@@ -141,6 +168,7 @@
     wallpaper: ['auto', 'aurora', 'sunset', 'lagoon', 'graphite', 'daylight'],
     glass: ['high', 'standard', 'low'],
     touch: ['gestures', 'buttons'],
+    skin: ['jelly', 'crystal', 'neon', 'pearl'],
   };
 
   function validSetting(k, v) {
@@ -190,7 +218,11 @@
   const finite = (v) => typeof v === 'number' && isFinite(v) && v >= 0;
 
   function validRun(run) {
-    return isPlainObject(run) && ['score', 'lines', 'level', 'time', 'pieces', 'date'].every((k) => finite(run[k]));
+    if (!isPlainObject(run) || !['score', 'lines', 'level', 'time', 'pieces', 'date'].every((k) => finite(run[k]))) return false;
+    // Optional per-line times (Sprint pace); drop them if malformed.
+    if ('lineTimes' in run && !(Array.isArray(run.lineTimes) && run.lineTimes.length <= 40 && run.lineTimes.every(finite))) delete run.lineTimes;
+    if ('splits' in run && !(Array.isArray(run.splits) && run.splits.every(finite))) delete run.splits;
+    return true;
   }
 
   function loadRecords() {
@@ -328,6 +360,9 @@
     SDF_INFINITE,
     MODE_ORDER,
     ACHIEVEMENTS,
+    SKINS,
+    playerXP,
+    levelInfo,
     loadSettings,
     saveSettings,
     hasSavedSettings,

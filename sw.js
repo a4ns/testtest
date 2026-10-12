@@ -1,5 +1,5 @@
 /* Offline support: network first (always fresh when online), cache fallback. */
-const CACHE = 'lgtetris-v2';
+const CACHE = 'lgtetris-v3';
 const ASSETS = [
   './',
   'index.html',
@@ -11,7 +11,7 @@ const ASSETS = [
   'js/renderer.js',
   'js/wallpaper.js',
   'js/input.js',
-  'js/lens.js',
+  'js/glass-gl.js',
   'js/app.js',
   'assets/icon.svg',
   'assets/icon-180.png',
