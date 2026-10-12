@@ -74,6 +74,7 @@ uniform float uDanger;
 uniform float uLight;
 uniform vec2 uLightPos;
 uniform float uDpr;
+uniform float uMag;
 out vec4 o;
 
 float sdBox(vec2 p, vec2 b, float r) {
@@ -116,11 +117,12 @@ void main() {
   float k = clamp(1.0 - inside / uBand, 0.0, 1.0);
   float lens = k * k * (3.0 - 2.0 * k);
 
-  // Refraction: sample inward near the rim, splitting colours slightly.
-  vec2 q = vPx - n * lens * uRefract;
+  // A thick convex slab: the middle magnifies a little, and near the rim the
+  // backdrop bends inward hard, splitting into colour fringes (dispersion).
+  vec2 q = c + p * (1.0 - uMag) - n * lens * lens * uRefract;
   vec3 col = bgAt(q, uLod);
   if (lens > 0.01) {
-    float disp = lens * 1.8 * uDpr;
+    float disp = lens * lens * (0.9 * uDpr + uRefract * 0.16);
     col.r = bgAt(q + n * disp, uLod).r;
     col.b = bgAt(q - n * disp, uLod).b;
   }
@@ -153,11 +155,13 @@ void main() {
 }`;
 
   // Material presets (CSS px; scaled by DPR in the shader inputs).
+  // Clearer than frosted CSS glass: the playfield keeps enough blur for the
+  // stack to read; text surfaces lean on adaptive dimming instead of frost.
   const MATERIALS = {
-    board: { lod: 4.3, refract: 16, band: 28, dim: [0.44, 0.3], tint: [0.04, 0.34], shadow: [0.34, 0.12] },
-    panel: { lod: 3.3, refract: 13, band: 22, dim: [0.3, 0.16], tint: [0.08, 0.36], shadow: [0.3, 0.12] },
-    card: { lod: 2.6, refract: 18, band: 26, dim: [0.16, 0.08], tint: [0.09, 0.34], shadow: [0.28, 0.12] },
-    control: { lod: 1.6, refract: 12, band: 18, dim: [0.08, 0.04], tint: [0.13, 0.42], shadow: [0.22, 0.1] },
+    board: { lod: 3.7, refract: 24, band: 30, mag: 0.012, dim: [0.46, 0.32], tint: [0.04, 0.32], shadow: [0.34, 0.12] },
+    panel: { lod: 2.5, refract: 22, band: 24, mag: 0.02, dim: [0.36, 0.22], tint: [0.07, 0.3], shadow: [0.3, 0.12] },
+    card: { lod: 1.8, refract: 30, band: 30, mag: 0.03, dim: [0.24, 0.14], tint: [0.08, 0.26], shadow: [0.28, 0.12] },
+    control: { lod: 1.0, refract: 18, band: 20, mag: 0.04, dim: [0.12, 0.06], tint: [0.12, 0.4], shadow: [0.22, 0.1] },
   };
 
   function materialFor(el) {
@@ -273,7 +277,7 @@ void main() {
       state.progs.bg = program(gl, BG_FRAG, ['uBox', 'uRes', 'uBlob', 'uFx']);
       state.progs.copy = program(gl, COPY_FRAG, ['uBox', 'uRes', 'uBg']);
       state.progs.glass = program(gl, GLASS_FRAG, [
-        'uBox', 'uRes', 'uBg', 'uRect', 'uRadius', 'uOpacity', 'uLod', 'uRefract', 'uBand', 'uDim', 'uTint', 'uGlow', 'uShadow', 'uDanger', 'uLight', 'uLightPos', 'uDpr',
+        'uBox', 'uRes', 'uBg', 'uRect', 'uRadius', 'uOpacity', 'uLod', 'uRefract', 'uBand', 'uDim', 'uTint', 'uGlow', 'uShadow', 'uDanger', 'uLight', 'uLightPos', 'uDpr', 'uMag',
       ]);
     } catch (e) {
       return false;
@@ -470,6 +474,7 @@ void main() {
       gl.uniform1f(pg.u.uGlow, glow);
       gl.uniform1f(pg.u.uShadow, m.shadow[s]);
       gl.uniform1f(pg.u.uDanger, dz);
+      gl.uniform1f(pg.u.uMag, m.mag);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
   }

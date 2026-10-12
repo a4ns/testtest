@@ -359,6 +359,98 @@ try {
     await ctx.close();
   }
 
+  // ---- loop 4 regressions ---------------------------------------------
+  {
+    const { ctx, page } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    await page.addInitScript(() => {
+      // Gesture timing needs real frame rates, not software WebGL.
+      localStorage.removeItem('lgtetris.debug.forcegl');
+      localStorage.setItem('lgtetris.profile.v1', JSON.stringify({ seenTouchHelp: true }));
+      localStorage.setItem('lgtetris.records.v1', JSON.stringify({ marathon: [{ score: 100, lines: 1, level: 1, time: 5000, pieces: 6, date: 1 }] }));
+    });
+    await page.goto(base, { waitUntil: 'load' });
+    await sleep(1200);
+    await page.evaluate(() => window.__tetris.startGame('marathon'));
+    await sleep(1900);
+    // Touch: drag sideways, then flick down at the end -> hard drop.
+    const flick = await page.evaluate(async () => {
+      const g = window.__tetris.app.game;
+      const el = document.getElementById('game');
+      const r = document.getElementById('board-shell').getBoundingClientRect();
+      const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+      const ev = (type, x, y, id = 1) => el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: id === 1 }));
+      const before = g.stats.pieces;
+      let x = r.left + r.width / 2;
+      const y = r.top + r.height * 0.3;
+      ev('pointerdown', x, y);
+      for (let i = 0; i < 8; i++) {
+        await wait(25);
+        x += 14;
+        ev('pointermove', x, y);
+      }
+      await wait(20);
+      ev('pointermove', x + 2, y + 30);
+      await wait(16);
+      ev('pointermove', x + 3, y + 70);
+      await wait(16);
+      ev('pointerup', x + 3, y + 90);
+      await wait(50);
+      const dropped = g.stats.pieces - before;
+      // Two-finger tap -> 180.
+      const rot0 = g.active.rot;
+      const cx = r.left + r.width / 2;
+      ev('pointerdown', cx - 30, y, 5);
+      await wait(30);
+      ev('pointerdown', cx + 30, y, 6);
+      await wait(60);
+      ev('pointerup', cx + 30, y, 6);
+      ev('pointerup', cx - 30, y, 5);
+      await wait(30);
+      return { dropped, turned: (g.active.rot - rot0 + 4) % 4 };
+    });
+    if (flick.dropped !== 1) problems.push('drag-then-flick did not hard drop: ' + JSON.stringify(flick));
+    if (flick.turned !== 2) problems.push('two-finger tap did not rotate 180: ' + JSON.stringify(flick));
+    // Passing the best score mid-run gets a callout.
+    const best = await page.evaluate(async () => {
+      const g = window.__tetris.app.game;
+      g.score = 150;
+      g.hardDrop();
+      await new Promise((r) => setTimeout(r, 120));
+      return document.getElementById('callouts').textContent;
+    });
+    if (!/NEW BEST/.test(best)) problems.push('no NEW BEST callout: ' + best);
+    await shot(page, '50-new-best');
+    // Save & quit, then the discard X asks first.
+    await page.evaluate(() => {
+      const g = window.__tetris.app.game;
+      g.stats.pieces = 20;
+      window.__tetris.quit();
+    });
+    await sleep(700);
+    await page.tap('#btn-discard');
+    await sleep(500);
+    if (!(await page.locator('#screen-confirm').evaluate((e) => e.classList.contains('is-open')))) problems.push('discard did not ask for confirmation');
+    await page.tap('#btn-confirm-cancel');
+    await sleep(400);
+    if (await page.locator('#continue').isHidden()) problems.push('cancelled discard still removed the save');
+    await ctx.close();
+  }
+  {
+    // Solid glass: primary buttons keep their blue fill.
+    const { ctx, page } = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'light' });
+    await page.addInitScript(() => localStorage.setItem('lgtetris.settings.v1', JSON.stringify({ glass: 'low' })));
+    await page.goto(base, { waitUntil: 'load' });
+    await sleep(900);
+    await page.evaluate(() => window.__tetris.startGame('ultra'));
+    await sleep(1800);
+    await page.keyboard.press('Escape');
+    await sleep(700);
+    const bg = await page.evaluate(() => getComputedStyle(document.getElementById('btn-resume')).backgroundImage);
+    if (!/gradient/.test(bg)) problems.push('solid glass primary button lost its fill: ' + bg);
+    await shot(page, '51-solid-pause');
+    await ctx.close();
+  }
+
   // ---- dark scheme -----------------------------------------------------
   {
     const { ctx, page } = await newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' });

@@ -200,7 +200,10 @@
         this.canvas.height = h;
       }
       if (this.fx) {
-        const k = Math.min(1, 1500 / Math.max(root.innerWidth, root.innerHeight));
+        // Crisp on high-DPI screens, within a pixel budget (it's re-uploaded
+        // to the GPU whenever it moves).
+        const dpr = Math.min(1.5, root.devicePixelRatio || 1);
+        const k = Math.min(dpr, 1700 / Math.max(root.innerWidth, root.innerHeight));
         const fw = Math.max(16, Math.round(root.innerWidth * k));
         const fh = Math.max(16, Math.round(root.innerHeight * k));
         if (fw !== this.fx.width || fh !== this.fx.height) {

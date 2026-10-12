@@ -317,6 +317,7 @@
     st.setProperty('--mini', mini + 'px');
     st.setProperty('--bpad', bpad + 'px');
     st.setProperty('--board-w', cell * 10 + bpad * 2 + 'px');
+    els.root.style.setProperty('--board-w-root', cell * 10 + bpad * 2 + 'px');
     st.setProperty('--side', side + 'px');
     st.setProperty('--gap', Math.round(clamp(cell * 0.7, 10, 26)) + 'px');
     st.setProperty('--pad-size', padSize + 'px');
@@ -424,11 +425,31 @@
     sheet.style.transition = '';
   }
 
+  const morphOrigins = new WeakMap();
+
+  /** The origin control hands its glass to the sheet (hidden while it's out). */
+  function hideOrigin(sheet, origin) {
+    if (!origin || origin === els.boardShell) return;
+    morphOrigins.set(sheet, origin);
+    origin.classList.add('is-morph-origin');
+  }
+
+  function restoreOrigin(sheet, delay) {
+    const origin = morphOrigins.get(sheet);
+    if (!origin) return;
+    morphOrigins.delete(sheet);
+    const show = () => origin.classList.remove('is-morph-origin');
+    if (delay) setTimeout(show, delay);
+    else show();
+  }
+
   function morphOpen(screen, origin) {
     const sheet = screen.firstElementChild;
+    restoreOrigin(sheet);
     if (!canMorph(sheet, origin)) return;
     const token = {};
     morphTokens.set(sheet, token);
+    hideOrigin(sheet, origin);
     sheet.style.transition = 'none';
     sheet.style.transform = 'none';
     sheet.style.clipPath = 'none';
@@ -452,17 +473,25 @@
 
   function morphClose(screen, origin) {
     const sheet = screen.firstElementChild;
-    if (!canMorph(sheet, origin)) return;
+    if (!canMorph(sheet, origin)) {
+      restoreOrigin(sheet);
+      return;
+    }
+    // The control reappears as the sheet lands back in it.
+    restoreOrigin(sheet, 230);
     const token = {};
     morphTokens.set(sheet, token);
     const current = sheet.style.transform;
     sheet.style.transition = 'none';
+    // The screen just lost is-open, which would snap the sheet to transparent
+    // under transition:none; hold it visible so the melt can be seen.
+    sheet.style.opacity = '1';
     sheet.style.transform = 'none';
     const geo = morphGeometry(sheet, origin);
     sheet.style.transform = current;
     if (!sheet.style.clipPath) sheet.style.clipPath = geo.full;
     void sheet.offsetWidth;
-    sheet.style.transition = 'transform 0.34s ' + MORPH_EASE + ', clip-path 0.34s ' + MORPH_EASE + ', opacity 0.3s ease-in';
+    sheet.style.transition = 'transform 0.34s ' + MORPH_EASE + ', clip-path 0.34s ' + MORPH_EASE + ', opacity 0.34s cubic-bezier(0.7, 0, 0.9, 0.5)';
     sheet.style.transform = geo.move;
     sheet.style.clipPath = geo.small;
     sheet.style.opacity = '0';
@@ -654,19 +683,44 @@
     daily = S.loadDaily();
     $('#daily-date').textContent = prettyDay(today);
     const todayBest = daily.days[today];
-    $('[data-best="daily"]').textContent = todayBest != null ? fmtInt(todayBest) : 'Not played yet';
+    const medal = S.dailyMedal(todayBest || 0);
+    const bestEl = $('[data-best="daily"]');
+    bestEl.textContent = todayBest != null ? fmtInt(todayBest) + (medal.got ? ' · ' + medal.got.name : '') : 'Not played yet';
+    bestEl.className = medal.got ? 'medal-' + medal.got.id : '';
     const streak = S.liveStreak(daily, today);
+    const playedToday = daily.lastDay === today;
     const label = $('#daily-streak');
     label.textContent = '';
     if (streak > 0) {
       const sEl = document.createElement('span');
-      sEl.className = 'streak';
+      sEl.className = 'streak' + (playedToday ? '' : ' is-at-risk');
       sEl.innerHTML = '<svg aria-hidden="true"><use href="#i-flame"/></svg>';
-      sEl.appendChild(document.createTextNode(streak + '-day streak'));
+      // A streak that today's run hasn't extended yet says so.
+      sEl.appendChild(document.createTextNode(streak + '-day streak' + (playedToday ? '' : ' · play today to keep it')));
       label.appendChild(sEl);
     } else {
-      label.textContent = 'Today’s best';
+      label.textContent = medal.next ? fmtInt(medal.next.score) + ' for ' + medal.next.name : 'Today’s best';
     }
+    // The last seven days at a glance.
+    const week = $('#daily-week');
+    week.textContent = '';
+    let key = today;
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      days.unshift(key);
+      key = S.previousDay(key);
+    }
+    for (const d of days) {
+      const dot = document.createElement('i');
+      const sc = daily.days[d];
+      const m = sc != null ? S.dailyMedal(sc).got : null;
+      dot.className = (sc != null ? 'is-played' : '') + (m ? ' medal-' + m.id : '') + (d === today ? ' is-today' : '');
+      week.appendChild(dot);
+    }
+    $('.mode-daily').setAttribute(
+      'aria-label',
+      'Daily Challenge, ' + prettyDay(today) + '. ' + (todayBest != null ? 'Today’s best ' + fmtInt(todayBest) + (medal.got ? ', ' + medal.got.name + ' medal' : '') : 'Not played yet') + (streak ? '. ' + streak + '-day streak' : '')
+    );
 
     // Continue banner for the most recent saved run.
     const saves = SAVE_MODES.map((m) => ({ m, d: S.loadSave(m) })).filter((x) => {
@@ -798,14 +852,80 @@
     wall.setLevel(g.level);
     wall.setDanger(0);
     Audio.duck(false);
-    Audio.startMusic();
+    // The soundtrack carries on through retries instead of restarting.
+    Audio.ensureMusic();
     requestWakeLock();
+    // The score to beat this run (Sprint has its own live pace).
+    const best = g.mode === 'daily' ? daily.days[app.dailyKey || S.dayKey()] : g.mode !== 'sprint' && S.bestRun(records, g.mode) ? S.bestRun(records, g.mode).score : 0;
+    app.pbScore = typeof best === 'number' && best > 0 ? best : 0;
+    app.pbBeaten = false;
+    showKeysHint(g);
     $('#pause-mode').textContent = MODE_INFO[g.mode].name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
     $('#btn-quit').lastChild.textContent = g.mode === 'zen' ? 'End session' : g.mode === 'marathon' ? 'Save & quit' : 'Main menu';
   }
 
+  /** First few games on a keyboard: the essential keys, under the board. */
+  function showKeysHint(g) {
+    const box = $('#keys-hint');
+    const show = !app.coarse && profile.games < 3 && g.stats.pieces === 0;
+    box.hidden = !show;
+    box.classList.remove('is-leaving');
+    app.keysHint = show;
+    if (!show) return;
+    box.textContent = '';
+    const first = (a) => settings.bindings[a][0];
+    const items = [
+      [[first('left'), first('right')], 'Move'],
+      [[first('cw')], 'Rotate'],
+      [[first('hard')], 'Drop'],
+      [[first('hold')], 'Hold'],
+      [['Escape'], 'Pause'],
+    ];
+    for (const [codes, label] of items) {
+      if (codes.some((c) => !c)) continue;
+      const it = document.createElement('span');
+      for (const c of codes) {
+        const k = document.createElement('kbd');
+        k.textContent = keyName(c);
+        it.appendChild(k);
+      }
+      it.appendChild(document.createTextNode(label));
+      box.appendChild(it);
+    }
+  }
+
+  function hideKeysHint() {
+    if (!app.keysHint) return;
+    app.keysHint = false;
+    const box = $('#keys-hint');
+    box.classList.add('is-leaving');
+    setTimeout(() => {
+      if (!app.keysHint) box.hidden = true;
+    }, 500);
+  }
+
   /** quick: a one-beat READY instead of 3-2-1 (instant retries). */
-  function startGame(mode, quick) {
+  /** The playfield grows out of the mode card that started it. */
+  function zoomFromCard(card) {
+    if (!card || reduceMotion() || !els.game.animate || !card.getClientRects().length) return;
+    const from = card.getBoundingClientRect();
+    const to = els.boardShell.getBoundingClientRect();
+    if (!from.width || !to.width) return;
+    const s = clamp(from.width / to.width, 0.35, 0.9);
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    const ox = to.left + to.width / 2;
+    const oy = to.top + to.height / 2;
+    els.game.animate(
+      [
+        { transformOrigin: ox + 'px ' + oy + 'px', transform: 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px) scale(' + s.toFixed(3) + ')', opacity: 0 },
+        { transformOrigin: ox + 'px ' + oy + 'px', transform: 'none', opacity: 1 },
+      ],
+      { duration: 520, easing: 'cubic-bezier(0.22, 1.12, 0.36, 1)' }
+    );
+  }
+
+  function startGame(mode, quick, origin) {
     mode = E.MODES[mode] ? mode : 'marathon';
     abandonCurrent();
     if (SAVE_MODES.indexOf(mode) !== -1) discardSave(mode);
@@ -828,6 +948,7 @@
         },
         quick ? 1 : 3
       );
+    const fromMenu = app.screen === 'menu' || !!(origin && origin.closest('#screen-menu'));
     if (app.coarse && settings.touch === 'gestures' && !profile.seenTouchHelp) {
       setScreen('countdown');
       app.countdown = null;
@@ -838,6 +959,7 @@
       });
     } else {
       go();
+      if (fromMenu) zoomFromCard(origin);
     }
   }
 
@@ -893,12 +1015,12 @@
         ok: 'Start new',
         cancel: 'Continue saved run',
         origin,
-        onOk: () => startGame(mode),
+        onOk: () => startGame(mode, false, origin),
         onCancel: () => continueRun(mode),
       });
       return;
     }
-    startGame(mode);
+    startGame(mode, false, origin);
   }
 
   function requestRestart(origin) {
@@ -929,7 +1051,8 @@
 
   function updateCountdown(now) {
     const c = app.countdown;
-    const n = c.steps - Math.floor((now - c.start) / c.stepMs);
+    // The frame timestamp can predate the click that started the countdown.
+    const n = c.steps - Math.floor(Math.max(0, now - c.start) / c.stepMs);
     if (n === c.n) return;
     c.n = n;
     if (n >= 1) {
@@ -989,20 +1112,24 @@
     updateInert();
     releaseWakeLock();
     const won = ev.result !== 'topout';
+    const info = finalizeRun(g, ev);
+    app.endInfo = info;
+    // A top-out that set a new best is still a good day.
+    const best = info.rank === 1 && !!info.prevBest && ev.result !== 'ended';
     if (ev.result === 'ended') {
       app.endAt = now + 150;
     } else if (won) {
       Audio.play('win');
-      callout(ev.result === 'timeup' ? 'TIME!' : 'FINISH', null, 'pc');
+      callout(ev.result === 'timeup' ? 'TIME!' : 'FINISH', best ? 'New personal best' : null, 'pc');
       wall.pulse(1.2);
       app.endAt = now + 1200;
     } else {
       board.startGameOver(now);
-      Audio.play('gameOver');
+      Audio.play(best ? 'win' : 'gameOver');
+      if (best) callout('NEW BEST', fmtInt(g.score), 'best');
       haptic([30, 60, 40]);
       app.endAt = now + 1150;
     }
-    app.endInfo = finalizeRun(g, ev);
   }
 
   function finalizeRun(g, ev) {
@@ -1086,13 +1213,24 @@
       b.textContent = text;
       slot.appendChild(b);
     }
+    const line = (text, cls) => {
+      const el = document.createElement('span');
+      el.className = 'res-line' + (cls ? ' ' + cls : '');
+      el.textContent = text;
+      slot.appendChild(el);
+      return el;
+    };
+    // How this run compares with the best (when it isn't the best).
+    if (info.rank !== 1 && info.prevBest && mode !== 'sprint' && info.result !== 'ended') {
+      const pct = info.prevBest.score > 0 ? Math.round((g.score / info.prevBest.score) * 100) : 0;
+      line('Best ' + fmtInt(info.prevBest.score) + ' · this run ' + pct + '%');
+    }
     if (mode === 'daily' && info.result !== 'ended') {
-      const sEl = document.createElement('span');
-      sEl.className = 'eyebrow';
-      sEl.style.display = 'block';
-      sEl.style.marginTop = '8px';
-      sEl.textContent = daily.streak > 1 ? daily.streak + '-day streak · come back tomorrow' : 'New pieces tomorrow';
-      slot.appendChild(sEl);
+      const dayBest = daily.days[info.run.day] || g.score;
+      const medal = S.dailyMedal(dayBest);
+      if (medal.got) line(medal.got.name + ' medal today' + (medal.next ? ' · ' + fmtInt(medal.next.score - dayBest) + ' to ' + medal.next.name : ''), 'medal medal-' + medal.got.id);
+      else if (medal.next) line(fmtInt(medal.next.score - dayBest) + ' more for ' + medal.next.name, 'medal');
+      line(daily.streak > 1 ? daily.streak + '-day streak · new pieces tomorrow' : 'New pieces tomorrow');
     }
 
     const secs = g.time / 1000;
@@ -1141,11 +1279,23 @@
       extra++;
       for (const skin of S.SKINS) {
         if (skin.level > before.level && skin.level <= after.level) {
-          const c2 = document.createElement('span');
-          c2.className = 'unlock-chip';
-          c2.innerHTML = '<svg aria-hidden="true"><use href="#i-sliders"/></svg>';
-          c2.appendChild(document.createTextNode('New blocks: ' + skin.name));
-          c2.title = 'Choose it in Settings → Look';
+          // New blocks can be put on right here.
+          const c2 = document.createElement('button');
+          c2.type = 'button';
+          c2.className = 'unlock-chip is-action';
+          const label = () => {
+            const on = settings.skin === skin.id;
+            c2.innerHTML = '<svg aria-hidden="true"><use href="#' + (on ? 'i-check' : 'i-sliders') + '"/></svg>';
+            c2.appendChild(document.createTextNode(on ? 'Using ' + skin.name + ' blocks' : 'Use ' + skin.name + ' blocks'));
+            c2.setAttribute('aria-pressed', String(on));
+          };
+          label();
+          c2.addEventListener('click', () => {
+            settings.skin = skin.id;
+            commit('skin');
+            Audio.play('select');
+            label();
+          });
           unlocks.appendChild(c2);
         }
       }
@@ -1153,6 +1303,10 @@
     unlocks.hidden = !app.runUnlocks.length && !extra;
     if (app.runUnlocks.length || extra) setTimeout(() => Audio.play('achievement'), 450);
     $('#res-xp-level').textContent = 'Level ' + after.level;
+    const nextSkin = S.SKINS.find((k) => k.level > after.level);
+    $('#res-next').textContent = nextSkin
+      ? fmtInt(250 * nextSkin.level * (nextSkin.level - 1) - info.xpAfter) + ' XP to ' + nextSkin.name + ' blocks (level ' + nextSkin.level + ')'
+      : fmtInt(after.next - info.xpAfter) + ' XP to level ' + (after.level + 1);
     $('#res-xp-gain').textContent = '+' + fmtInt(gain) + ' XP';
     const fill = $('#res-xp-fill');
     fill.style.transition = 'none';
@@ -1185,6 +1339,12 @@
     if (st.perfectClears) feats.push(st.perfectClears + ' Perfect Clear' + (st.perfectClears > 1 ? 's' : ''));
     if (feats.length) out.push(feats.join(' · '));
     if (g.mode === 'daily' && daily.streak > 1) out.push(daily.streak + '-day streak');
+    if (g.mode === 'daily') {
+      const m = S.dailyMedal(g.score).got;
+      if (m) out.push(m.name + ' medal');
+    }
+    // Link back to the game when it's hosted somewhere others can open.
+    if (/^https?:$/.test(location.protocol) && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) out.push(location.origin + location.pathname);
     return out.join('\n');
   }
 
@@ -1249,6 +1409,7 @@
           haptic(8);
           break;
         case 'lock':
+          checkLiveBest();
           saveRun(false);
           board.onLock(ev, now);
           if (!app.hardDropping) Audio.play('lock');
@@ -1281,6 +1442,17 @@
     }
   }
 
+  /** Passing your best score mid-run gets its own moment, once. */
+  function checkLiveBest() {
+    const g = app.game;
+    if (!g || app.pbBeaten || !app.pbScore || g.score <= app.pbScore || g.state !== 'playing') return;
+    app.pbBeaten = true;
+    callout('NEW BEST', 'Past ' + fmtInt(app.pbScore), 'best');
+    Audio.play('achievement');
+    wall.pulse(0.6);
+    haptic([10, 40, 10]);
+  }
+
   function onClear(ev, now, fx) {
     board.onClear(ev, now, fx);
     Audio.play('clear', ev);
@@ -1289,6 +1461,7 @@
     if (special) bump(1.5, true);
     if (ev.lines) haptic(special ? [16, 40, 22] : 12);
     clearCallout(ev);
+    checkLiveBest();
     sprintSplits();
     checkAchievements(false);
   }
@@ -1591,6 +1764,7 @@
       els.ringFill.setAttribute('stroke-dashoffset', off);
     }
 
+    if (app.keysHint && (g.stats.pieces >= 6 || g.time > 14000)) hideKeysHint();
     holdView.drawHold(g.holdType, g.holdUsed, app.holdCell);
     nextView.drawQueue(g.queue, app.nextCount, app.nextCell, app.tall);
     // Screen readers get the pieces as text (read on demand, not announced).
@@ -1642,6 +1816,7 @@
     if (app.screen === 'playing' && app.game) app.game.update(dt, input.softHeld);
     governFrameRate(dt);
     processEvents(now);
+    updateLight(now, dt);
     if (app.screen === 'ending' && now >= app.endAt) showResults();
 
     const bgDrawn = wall.render(now, dt);
@@ -1711,6 +1886,7 @@
     refreshGlassUI();
     renderBindings();
     renderSkins();
+    syncTiltUI();
   }
 
   function refreshGlassUI() {
@@ -1787,6 +1963,18 @@
         break;
       case 'skin':
         applySkin();
+        break;
+      case 'tilt':
+        if (settings.tilt && tilt.needsPermission) {
+          requestTilt().then((ok) => {
+            if (!ok) {
+              settings.tilt = false;
+              S.saveSettings(settings);
+              $('#tilt-note').textContent = 'Motion access was declined. Allow it in Settings › Safari to use this.';
+            }
+            syncTiltUI();
+          });
+        }
         break;
     }
   }
@@ -2134,6 +2322,7 @@
     const box = $('#ach-list');
     box.textContent = '';
     let n = 0;
+    const prog = achievementProgress();
     for (const a of S.ACHIEVEMENTS) {
       const on = !!profile.achievements[a.id];
       if (on) n++;
@@ -2142,7 +2331,19 @@
       d.innerHTML = '<i><svg aria-hidden="true"><use href="#i-star"/></svg></i><span><b></b><small></small></span>';
       $('b', d).textContent = a.name;
       $('small', d).textContent = a.desc;
-      d.setAttribute('aria-label', a.name + (on ? ', unlocked. ' : ', locked. ') + a.desc);
+      let progressText = '';
+      const p = !on && prog[a.id];
+      if (p && p[0] > 0) {
+        // How close you are, for the ones that build up over time.
+        const bar = document.createElement('span');
+        bar.className = 'ach-progress';
+        bar.innerHTML = '<span class="xp-bar"><i></i></span><em class="num"></em>';
+        $('i', bar).style.width = Math.min(100, (p[0] / p[1]) * 100).toFixed(1) + '%';
+        progressText = fmtInt(Math.min(p[0], p[1])) + ' / ' + fmtInt(p[1]);
+        $('em', bar).textContent = progressText;
+        $('span', d).appendChild(bar);
+      }
+      d.setAttribute('aria-label', a.name + (on ? ', unlocked. ' : ', locked. ') + a.desc + (progressText ? ' Progress ' + progressText + '.' : ''));
       box.appendChild(d);
     }
     $('#ach-count').textContent = n + ' of ' + S.ACHIEVEMENTS.length + ' unlocked';
@@ -2171,6 +2372,25 @@
       d.append(dt, dd);
       life.appendChild(d);
     }
+  }
+
+  /** [current, goal] for achievements that accumulate across games. */
+  function achievementProgress() {
+    const best = (m, k) => (records[m] || []).reduce((v, r) => Math.max(v, num(r[k])), 0);
+    const sprintBest = S.bestRun(records, 'sprint');
+    return {
+      lines1000: [profile.lines, 1000],
+      level10: [best('marathon', 'level'), 10],
+      level15: [best('marathon', 'level'), 15],
+      level20: [best('marathon', 'level'), 20],
+      score100k: [Math.max(profile.bestScore, 0), 100000],
+      ultra30k: [best('ultra', 'score'), 30000],
+      ultra60k: [best('ultra', 'score'), 60000],
+      zen200: [best('zen', 'lines'), 200],
+      streak3: [S.liveStreak(daily, S.dayKey()), 3],
+      streak7: [S.liveStreak(daily, S.dayKey()), 7],
+      sprint: [sprintBest ? 40 : best('sprint', 'lines'), 40],
+    };
   }
 
   // ------------------------------------------------------- keyboard & nav
@@ -2380,51 +2600,116 @@
     });
   }
 
-  function setupPointerLight() {
-    let pending = false;
-    let lx = 0;
-    let ly = 0;
-    document.addEventListener(
-      'pointermove',
-      (e) => {
-        if (e.pointerType !== 'mouse') return;
-        lx = e.clientX;
-        ly = e.clientY;
-        if (pending) return;
-        pending = true;
-        requestAnimationFrame(() => {
-          pending = false;
-          els.root.style.setProperty('--lx', lx + 'px');
-          els.root.style.setProperty('--ly', ly + 'px');
-          Glass.setLight(lx, ly);
-        });
-      },
-      { passive: true }
-    );
+  // -- the light that the glass catches
+  // It follows the mouse or your finger, tilts with the phone, and when left
+  // alone drifts slowly across the screen, so the rims are never static.
+  const light = { x: 0, y: 0, tx: 0, ty: 0, inputAt: -1e9, fast: false, pushedAt: 0, cssAt: 0, cssX: -1, cssY: -1, ready: false };
+
+  function aimLight(x, y, fast) {
+    light.tx = x;
+    light.ty = y;
+    light.fast = fast;
+    light.inputAt = performance.now();
   }
 
-  /** On Android, tilting the phone moves the specular light across the glass. */
+  function updateLight(now, dt) {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    if (!light.ready) {
+      light.x = light.tx = W * 0.28;
+      light.y = light.ty = -H * 0.25;
+      light.ready = true;
+    }
+    const idle = now - light.inputAt > 6000;
+    if (idle) {
+      if (reduceMotion()) return;
+      light.tx = W * (0.5 + 0.4 * Math.sin(now / 11000));
+      light.ty = H * (-0.16 + 0.1 * Math.cos(now / 8000));
+      light.fast = false;
+    }
+    const k = 1 - Math.exp(-dt / (light.fast ? 50 : idle ? 1200 : 260));
+    light.x += (light.tx - light.x) * k;
+    light.y += (light.ty - light.y) * k;
+    // Slow drift only needs ~30 updates a second.
+    if (!light.fast && now - light.pushedAt < 32) return;
+    light.pushedAt = now;
+    Glass.setLight(light.x, light.y);
+    // CSS glass reads the same light; restyling the page is costlier, so less often.
+    if (now - light.cssAt > (light.fast ? 16 : 120) && (Math.abs(light.x - light.cssX) > 1.5 || Math.abs(light.y - light.cssY) > 1.5)) {
+      light.cssAt = now;
+      light.cssX = light.x;
+      light.cssY = light.y;
+      els.root.style.setProperty('--lx', light.x.toFixed(0) + 'px');
+      els.root.style.setProperty('--ly', light.y.toFixed(0) + 'px');
+    }
+  }
+
+  function setupPointerLight() {
+    const onPointer = (e) => {
+      if (e.pointerType === 'mouse') aimLight(e.clientX, e.clientY, true);
+      // A finger lights the glass from just above where it touches.
+      else aimLight(e.clientX, e.clientY - 80, false);
+    };
+    document.addEventListener('pointermove', onPointer, { passive: true });
+    document.addEventListener('pointerdown', onPointer, { passive: true });
+  }
+
+  // -- tilt: free on Android; iOS asks for permission, so it's opt-in there
+  const tilt = { attached: false, needsPermission: false, supported: false };
+
+  function attachTilt() {
+    if (tilt.attached) return;
+    tilt.attached = true;
+    window.addEventListener('deviceorientation', (e) => {
+      if (!settings.tilt || e.beta == null || e.gamma == null || reduceMotion()) return;
+      const gx = clamp(e.gamma / 40, -1, 1);
+      const gy = clamp((e.beta - 45) / 40, -1, 1);
+      aimLight((0.5 + gx * 0.6) * window.innerWidth, (0.15 + gy * 0.5) * window.innerHeight, false);
+    });
+  }
+
+  function requestTilt() {
+    const DOE = window.DeviceOrientationEvent;
+    if (!tilt.needsPermission) {
+      attachTilt();
+      return Promise.resolve(true);
+    }
+    return DOE.requestPermission()
+      .then((r) => r === 'granted')
+      .catch(() => false)
+      .then((ok) => {
+        profile.motionGranted = ok;
+        S.saveProfile(profile);
+        if (ok) attachTilt();
+        return ok;
+      });
+  }
+
   function setupTilt() {
     const DOE = window.DeviceOrientationEvent;
-    if (!app.coarse || !DOE || typeof DOE.requestPermission === 'function') return;
-    let pending = false;
-    let gx = 0;
-    let gy = 0;
-    window.addEventListener('deviceorientation', (e) => {
-      if (e.beta == null || e.gamma == null || reduceMotion()) return;
-      gx = clamp(e.gamma / 40, -1, 1);
-      gy = clamp((e.beta - 45) / 40, -1, 1);
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(() => {
-        pending = false;
-        const tx = Math.round((0.5 + gx * 0.6) * window.innerWidth);
-        const ty = Math.round((0.15 + gy * 0.5) * window.innerHeight);
-        els.root.style.setProperty('--lx', tx + 'px');
-        els.root.style.setProperty('--ly', ty + 'px');
-        Glass.setLight(tx, ty);
-      });
-    });
+    tilt.supported = !!(app.coarse && DOE);
+    tilt.needsPermission = tilt.supported && typeof DOE.requestPermission === 'function';
+    $('#row-tilt').hidden = !tilt.supported;
+    if (!tilt.supported) return;
+    if (!tilt.needsPermission) {
+      attachTilt();
+      return;
+    }
+    // iOS: permission was granted before, so re-confirm silently on the first tap.
+    if (settings.tilt && profile.motionGranted) {
+      const once = () => {
+        document.removeEventListener('pointerup', once, true);
+        requestTilt();
+      };
+      document.addEventListener('pointerup', once, true);
+    }
+  }
+
+  /** The tilt switch shows on only when the light really follows the phone. */
+  function syncTiltUI() {
+    const box = $('#set-tilt');
+    if (!box) return;
+    box.checked = settings.tilt && (!tilt.needsPermission || profile.motionGranted);
   }
 
   function registerServiceWorker() {

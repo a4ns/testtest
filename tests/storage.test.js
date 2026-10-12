@@ -150,7 +150,7 @@ test('player levels follow the triangular XP curve', () => {
   assert.ok(Math.abs(l.frac - 1 / 3) < 1e-9);
   const p = { lines: 10, tetrises: 1, tspins: 1, perfectClears: 0, games: 2, achievements: { a: 1, b: 2 } };
   assert.equal(S.playerXP(p), 100 + 40 + 60 + 40 + 500);
-  assert.deepEqual(S.SKINS.map((s) => s.level), [1, 3, 5, 8]);
+  assert.deepEqual(S.SKINS.map((s) => s.level), [1, 3, 5, 8, 12, 16, 20]);
 });
 
 test('profile keeps only known achievements and non-negative stats', () => {
@@ -168,4 +168,12 @@ test('profile keeps only known achievements and non-negative stats', () => {
 test('storage availability probe', () => {
   mem.clear();
   assert.equal(S.available(), true);
+});
+
+test('daily medals', () => {
+  assert.equal(S.dailyMedal(0).got, null);
+  assert.equal(S.dailyMedal(0).next.id, 'bronze');
+  assert.equal(S.dailyMedal(12000).got.id, 'silver');
+  assert.equal(S.dailyMedal(12000).next.id, 'gold');
+  assert.equal(S.dailyMedal(99999).next, null);
 });

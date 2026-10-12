@@ -2,7 +2,8 @@
 
 A falling-block puzzle game built from Apple-style Liquid Glass: clear glass
 slabs rendered on the GPU with real edge refraction, colour dispersion, a thin
-specular rim that follows your pointer (or your phone's tilt) and a tint that
+specular rim that follows your pointer, finger or phone's tilt (and drifts slowly
+on its own) and a tint that
 adapts to what's behind it; sheets that grow out of the button you pressed;
 glass-jewel blocks; and a living wallpaper that pulses with every clear.
 
@@ -10,7 +11,7 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 
 ## Play
 
-- **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; build a streak.
+- **Daily Challenge** — a new two-minute run every day with the same pieces for everyone; earn Bronze, Silver and Gold medals and build a streak.
 - **Marathon** — endless; gravity speeds up every 10 lines (guideline curve up to level 20). Save & quit any time and continue later.
 - **Sprint 40L** — clear 40 lines as fast as you can, with your pace against your best at 10, 20 and 30 lines.
 - **Ultra 2:00** — score as much as you can in two minutes.
@@ -28,8 +29,9 @@ No build step and no dependencies. Open `index.html` in a browser and play.
 | Pause | Esc, P |
 | Restart (Sprint/Ultra, pause, results) | R |
 
-**Touch:** drag sideways to move, tap the right/left half to rotate, drag down
-to soft drop, flick down to hard drop, flick up to hold. On-screen buttons are
+**Touch:** drag sideways to move, tap the right/left half to rotate, tap with two
+fingers to rotate 180°, drag down to soft drop, flick down to hard drop, flick up
+to hold. On-screen buttons are
 available in Settings → Controls. **Gamepads** work too (D-pad, A/B rotate,
 Y 180°, bumpers hold, Start pause).
 
@@ -47,10 +49,11 @@ Y 180°, bumpers hold, Start pause).
 - **Sound:** all effects and both soundtracks (the ambient *Glass Garden* and a
   glassy *Korobeiniki*) are synthesized live with the Web Audio API. Combos
   climb a pentatonic scale; the music speeds up with the level.
-- **Progression:** player levels and XP, unlockable block materials (Crystal, Neon,
-  Pearl), personal top-10 per mode, 23 achievements, daily streaks, lifetime stats,
-  resumable Marathon/Zen runs, Sprint live pace vs your best, one-key instant retry (R),
-  shareable results.
+- **Progression:** player levels and XP, seven block materials unlocked along the
+  way (Jelly, Crystal, Neon, Pearl, Gilded, Bubble, Prism), personal top-10 per mode,
+  23 achievements with progress, daily medals and streaks, lifetime stats, resumable
+  Marathon/Zen runs, Sprint live pace vs your best, a NEW BEST moment the instant you
+  pass your record, one-key instant retry (R), shareable results.
 - **Layouts** for desktop, portrait phones and landscape phones, with touch gestures or buttons.
 - **Installable PWA** with offline support (when served over HTTPS).
 - **Accessible:** full keyboard and gamepad navigation, reduced-motion and

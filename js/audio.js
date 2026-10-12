@@ -22,7 +22,7 @@
     ctx: null,
     n: null,
     noise: null,
-    volumes: { master: 0.8, sfx: 0.8, music: 0.45 },
+    volumes: { master: 0.8, sfx: 0.8, music: 0.6 },
     track: 'glass',
     level: 1,
     wantMusic: false,
@@ -107,7 +107,8 @@
     master.gain.setTargetAtTime(v.master * v.master, t, 0.02);
     sfxDry.gain.setTargetAtTime(v.sfx, t, 0.02);
     sfxWet.gain.setTargetAtTime(v.sfx, t, 0.02);
-    music.gain.setTargetAtTime(v.music * v.music * 0.9, t, 0.05);
+    // Music sits just under the effects rather than far below them.
+    music.gain.setTargetAtTime(v.music * v.music * 2, t, 0.05);
   }
 
   // ---- voices ----------------------------------------------------------

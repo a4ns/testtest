@@ -68,6 +68,9 @@
     if (skin === 'crystal') return makeCrystal(hex, s);
     if (skin === 'neon') return makeNeon(hex, s);
     if (skin === 'pearl') return makePearl(hex, s);
+    if (skin === 'gilded') return makeGilded(hex, s);
+    if (skin === 'bubble') return makeBubble(hex, s);
+    if (skin === 'prism') return makePrism(hex, s);
     const c = makeCanvas(s, s);
     const g = c.getContext('2d');
     const rgb = hexToRgb(hex);
@@ -247,6 +250,151 @@
     const gx = inset + w * 0.32;
     const gy = inset + w * 0.28;
     const gl = g.createRadialGradient(gx, gy, 0, gx, gy, w * 0.22);
+    gl.addColorStop(0, 'rgba(255,255,255,0.95)');
+    gl.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gl;
+    g.fillRect(inset, inset, w, w);
+    return c;
+  }
+
+  // Gilded: coloured glass set in a polished gold bezel.
+  function makeGilded(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.05);
+    const w = s - inset * 2;
+    const r = w * 0.22;
+    const gold = g.createLinearGradient(inset, inset, inset + w, inset + w);
+    gold.addColorStop(0, '#fff6c4');
+    gold.addColorStop(0.3, '#f2c14e');
+    gold.addColorStop(0.55, '#a8701a');
+    gold.addColorStop(0.8, '#f7d77a');
+    gold.addColorStop(1, '#8a5a12');
+    roundRect(g, inset, inset, w, w, r);
+    g.fillStyle = gold;
+    g.fill();
+    const b = Math.max(1.5, w * 0.14);
+    const iw = w - 2 * b;
+    roundRect(g, inset + b, inset + b, iw, iw, r * 0.6);
+    const body = g.createLinearGradient(inset + b, inset + b, inset + b + iw * 0.4, inset + b + iw);
+    body.addColorStop(0, rgba(mix(rgb, WHITE, 0.45), 1));
+    body.addColorStop(0.55, rgba(rgb, 1));
+    body.addColorStop(1, rgba(mix(rgb, BLACK, 0.35), 1));
+    g.fillStyle = body;
+    g.fill();
+    g.save();
+    roundRect(g, inset + b, inset + b, iw, iw, r * 0.6);
+    g.clip();
+    const sh = g.createLinearGradient(0, inset + b, 0, inset + b + iw * 0.5);
+    sh.addColorStop(0, 'rgba(255,255,255,0.55)');
+    sh.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = sh;
+    g.fillRect(inset + b, inset + b, iw, iw * 0.5);
+    g.restore();
+    const gx = inset + w * 0.24;
+    const gy = inset + w * 0.2;
+    const gl = g.createRadialGradient(gx, gy, 0, gx, gy, w * 0.16);
+    gl.addColorStop(0, 'rgba(255,255,240,1)');
+    gl.addColorStop(1, 'rgba(255,255,240,0)');
+    g.fillStyle = gl;
+    g.fillRect(inset, inset, w, w);
+    return c;
+  }
+
+  // Bubble: a thin, clear film with an iridescent swirl and a coloured rim.
+  function makeBubble(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.05);
+    const w = s - inset * 2;
+    const r = w * 0.44;
+    roundRect(g, inset, inset, w, w, r);
+    const body = g.createRadialGradient(s / 2, s / 2, w * 0.15, s / 2, s / 2, w * 0.62);
+    body.addColorStop(0, rgba(rgb, 0.16));
+    body.addColorStop(0.75, rgba(rgb, 0.42));
+    body.addColorStop(1, rgba(mix(rgb, WHITE, 0.3), 0.85));
+    g.fillStyle = body;
+    g.fill();
+    g.save();
+    roundRect(g, inset, inset, w, w, r);
+    g.clip();
+    const film = g.createLinearGradient(inset, inset + w, inset + w, inset);
+    film.addColorStop(0, 'rgba(255,120,200,0.22)');
+    film.addColorStop(0.35, 'rgba(255,230,120,0.12)');
+    film.addColorStop(0.65, 'rgba(120,255,220,0.2)');
+    film.addColorStop(1, 'rgba(140,150,255,0.24)');
+    g.fillStyle = film;
+    g.fillRect(inset, inset, w, w);
+    g.restore();
+    const lw = Math.max(1, s * 0.05);
+    roundRect(g, inset + lw / 2, inset + lw / 2, w - lw, w - lw, r - lw / 2);
+    g.lineWidth = lw;
+    g.strokeStyle = rgba(mix(rgb, WHITE, 0.5), 0.95);
+    g.stroke();
+    // A curved window reflection and a small catchlight.
+    g.save();
+    g.beginPath();
+    g.arc(inset + w * 0.42, inset + w * 0.42, w * 0.3, Math.PI * 1.05, Math.PI * 1.55);
+    g.lineWidth = Math.max(1, w * 0.07);
+    g.lineCap = 'round';
+    g.strokeStyle = 'rgba(255,255,255,0.85)';
+    g.stroke();
+    g.restore();
+    const gx = inset + w * 0.72;
+    const gy = inset + w * 0.74;
+    const gl = g.createRadialGradient(gx, gy, 0, gx, gy, w * 0.08);
+    gl.addColorStop(0, 'rgba(255,255,255,0.9)');
+    gl.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gl;
+    g.fillRect(inset, inset, w, w);
+    return c;
+  }
+
+  // Prism: glass that splits light, with a spectrum running round its edge.
+  function makePrism(hex, s) {
+    const c = makeCanvas(s, s);
+    const g = c.getContext('2d');
+    const rgb = hexToRgb(hex);
+    const inset = Math.max(1, s * 0.05);
+    const w = s - inset * 2;
+    const r = w * 0.2;
+    roundRect(g, inset, inset, w, w, r);
+    const body = g.createLinearGradient(inset, inset, inset + w, inset + w);
+    body.addColorStop(0, rgba(mix(rgb, WHITE, 0.55), 0.9));
+    body.addColorStop(0.5, rgba(rgb, 0.78));
+    body.addColorStop(1, rgba(mix(rgb, BLACK, 0.3), 0.9));
+    g.fillStyle = body;
+    g.fill();
+    g.save();
+    roundRect(g, inset, inset, w, w, r);
+    g.clip();
+    // A band of split light crossing the block.
+    const band = g.createLinearGradient(inset, inset + w * 0.2, inset + w, inset + w * 0.8);
+    const spec = ['255,80,80', '255,200,60', '120,255,120', '80,220,255', '170,110,255'];
+    band.addColorStop(0, 'rgba(255,255,255,0)');
+    spec.forEach((col, i) => band.addColorStop(0.3 + i * 0.08, 'rgba(' + col + ',0.38)'));
+    band.addColorStop(0.75, 'rgba(255,255,255,0)');
+    g.fillStyle = band;
+    g.fillRect(inset, inset, w, w);
+    g.restore();
+    const lw = Math.max(1.2, s * 0.06);
+    roundRect(g, inset + lw / 2, inset + lw / 2, w - lw, w - lw, r - lw / 2);
+    const rim = g.createLinearGradient(inset, inset, inset + w, inset + w);
+    rim.addColorStop(0, '#ffffff');
+    rim.addColorStop(0.2, '#ff7a7a');
+    rim.addColorStop(0.38, '#ffd166');
+    rim.addColorStop(0.55, '#7dffa0');
+    rim.addColorStop(0.72, '#6ad8ff');
+    rim.addColorStop(0.9, '#b48cff');
+    rim.addColorStop(1, '#ffffff');
+    g.lineWidth = lw;
+    g.strokeStyle = rim;
+    g.stroke();
+    const gx = inset + w * 0.26;
+    const gy = inset + w * 0.22;
+    const gl = g.createRadialGradient(gx, gy, 0, gx, gy, w * 0.14);
     gl.addColorStop(0, 'rgba(255,255,255,0.95)');
     gl.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = gl;

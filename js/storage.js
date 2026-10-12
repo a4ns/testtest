@@ -52,7 +52,7 @@
     previews: 5,
     startLevel: 1,
     master: 0.8,
-    music: 0.45,
+    music: 0.6,
     sfx: 0.8,
     track: 'glass',
     wallpaper: 'auto',
@@ -63,6 +63,7 @@
     animatedBg: true,
     touch: 'gestures',
     haptics: true,
+    tilt: true,
     skin: 'jelly',
     bindings: DEFAULT_BINDINGS,
   };
@@ -73,6 +74,9 @@
     { id: 'crystal', name: 'Crystal', level: 3 },
     { id: 'neon', name: 'Neon', level: 5 },
     { id: 'pearl', name: 'Pearl', level: 8 },
+    { id: 'gilded', name: 'Gilded', level: 12 },
+    { id: 'bubble', name: 'Bubble', level: 16 },
+    { id: 'prism', name: 'Prism', level: 20 },
   ];
 
   /** Experience earned from everything you've done, ever. */
@@ -91,6 +95,24 @@
   }
 
   const MODE_ORDER = ['marathon', 'sprint', 'ultra', 'zen', 'daily'];
+
+  // Daily Challenge medals (two minutes, Ultra rules).
+  const DAILY_MEDALS = [
+    { id: 'bronze', name: 'Bronze', score: 5000 },
+    { id: 'silver', name: 'Silver', score: 10000 },
+    { id: 'gold', name: 'Gold', score: 20000 },
+  ];
+
+  /** The best medal a daily score earns (or null), and the next one to aim for. */
+  function dailyMedal(score) {
+    let got = null;
+    let next = null;
+    for (const m of DAILY_MEDALS) {
+      if (score >= m.score) got = m;
+      else if (!next) next = m;
+    }
+    return { got, next };
+  }
 
   const ACHIEVEMENTS = [
     { id: 'first-line', name: 'First Light', desc: 'Clear your first line.' },
@@ -180,7 +202,7 @@
     wallpaper: ['auto', 'aurora', 'sunset', 'lagoon', 'graphite', 'daylight'],
     glass: ['high', 'standard', 'low'],
     touch: ['gestures', 'buttons'],
-    skin: ['jelly', 'crystal', 'neon', 'pearl'],
+    skin: SKINS.map((k) => k.id),
   };
 
   function validSetting(k, v) {
@@ -284,6 +306,7 @@
       bestScore: 0,
       achievements: {},
       seenTouchHelp: false,
+      motionGranted: false,
     };
     if (isPlainObject(saved)) {
       for (const k of Object.keys(p)) {
@@ -384,6 +407,8 @@
     playerXP,
     levelInfo,
     available,
+    DAILY_MEDALS,
+    dailyMedal,
     loadSettings,
     saveSettings,
     hasSavedSettings,
