@@ -189,6 +189,8 @@ void main() {
     scheme: 0,
     needsBg: true,
     onLost: null,
+    lost: false,
+    losses: 0,
   };
 
   function compile(gl, type, src) {
@@ -246,6 +248,27 @@ void main() {
       state.software = true;
       return false;
     }
+    if (!setup(gl)) return false;
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      state.gl = null;
+      state.lost = true;
+      state.losses++;
+      setEnabled(false);
+      state.supported = false;
+      if (state.onLost) state.onLost();
+    });
+    // The driver came back: rebuild everything (a GPU that keeps resetting
+    // is left on CSS glass for the rest of the session).
+    canvas.addEventListener('webglcontextrestored', () => {
+      if (state.losses > 2 || !setup(gl)) return;
+      state.lost = false;
+      if (state.onLost) state.onLost();
+    });
+    return true;
+  }
+
+  function setup(gl) {
     try {
       state.progs.bg = program(gl, BG_FRAG, ['uBox', 'uRes', 'uBlob', 'uFx']);
       state.progs.copy = program(gl, COPY_FRAG, ['uBox', 'uRes', 'uBg']);
@@ -268,13 +291,9 @@ void main() {
     state.fbo = gl.createFramebuffer();
     state.gl = gl;
     state.supported = true;
-    canvas.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault();
-      state.gl = null;
-      state.supported = false;
-      setEnabled(false);
-      if (state.onLost) state.onLost();
-    });
+    state.W = state.H = 0;
+    state.sig = '';
+    state.needsBg = true;
     resize();
     return true;
   }
@@ -467,6 +486,10 @@ void main() {
     get software() {
       return !!state.software;
     },
+    /** The GPU context was lost and hasn't come back. */
+    get lost() {
+      return state.lost;
+    },
     get enabled() {
       return state.enabled;
     },
@@ -477,6 +500,7 @@ void main() {
       state.light = [x, y];
       state.lightSet = true;
     },
+    /** Called when the context is lost and again if it's restored. */
     onContextLost(cb) {
       state.onLost = cb;
     },

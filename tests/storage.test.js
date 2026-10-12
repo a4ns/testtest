@@ -121,8 +121,11 @@ test('daily streak grows on consecutive days and resets after a gap', () => {
 test('saved runs round-trip and clear', () => {
   mem.clear();
   assert.equal(S.loadSave('marathon'), null);
-  S.writeSave('marathon', { game: { v: 1 }, savedAt: 5 });
+  S.writeSave('marathon', { game: { v: 1, mode: 'marathon' }, savedAt: 5 });
   assert.equal(S.loadSave('marathon').savedAt, 5);
+  // A save filed under the wrong mode is ignored.
+  S.writeSave('zen', { game: { v: 1, mode: 'marathon' }, savedAt: 5 });
+  assert.equal(S.loadSave('zen'), null);
   S.clearSave('marathon');
   assert.equal(S.loadSave('marathon'), null);
 });
@@ -148,4 +151,21 @@ test('player levels follow the triangular XP curve', () => {
   const p = { lines: 10, tetrises: 1, tspins: 1, perfectClears: 0, games: 2, achievements: { a: 1, b: 2 } };
   assert.equal(S.playerXP(p), 100 + 40 + 60 + 40 + 500);
   assert.deepEqual(S.SKINS.map((s) => s.level), [1, 3, 5, 8]);
+});
+
+test('profile keeps only known achievements and non-negative stats', () => {
+  mem.clear();
+  localStorage.setItem(
+    'lgtetris.profile.v1',
+    JSON.stringify({ lines: -50, games: 3, achievements: { tetris: 1700000000000, fake1: 1, fake2: 2, pc: 'yes' } })
+  );
+  const p = S.loadProfile();
+  assert.deepEqual(Object.keys(p.achievements), ['tetris']);
+  assert.equal(p.lines, 0);
+  assert.equal(p.games, 3);
+});
+
+test('storage availability probe', () => {
+  mem.clear();
+  assert.equal(S.available(), true);
 });

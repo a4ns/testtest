@@ -68,6 +68,8 @@
       cL: $('#st-c-l'),
     },
     touchPad: $('#touch-pad'),
+    holdSr: $('#hold-sr'),
+    nextSr: $('#next-sr'),
     btnPause: $('#btn-pause'),
     btnFs: $('#btn-fullscreen'),
     toasts: $('#toasts'),
@@ -139,6 +141,9 @@
       haptic: (p) => haptic(p),
       afterAction: () => flush(),
       canCharge: () => app.screen === 'countdown' && !!app.countdown,
+      // Pad presses still being mashed from the last game don't skip the results.
+      menuReady: () =>
+        !!app.modal || app.screen === 'menu' || app.screen === 'paused' || (app.screen === 'results' && performance.now() - app.resultsShownAt > 600),
     },
   });
 
@@ -709,7 +714,8 @@
 
   function addLifetime(t) {
     if (!t || (!t.pieces && !t.time)) return;
-    profile.games += 1;
+    // Only a real attempt counts as a game (instant retries don't farm XP).
+    if (hasProgress(t.pieces)) profile.games += 1;
     profile.lines += num(t.lines);
     profile.pieces += num(t.pieces);
     profile.tetrises += num(t.tetrises);
@@ -777,6 +783,7 @@
     app.endInfo = null;
     app.hardDropping = false;
     app.runUnlocks = (extra && extra.unlocks) || [];
+    app.xpStart = S.playerXP(profile);
     app.splits = [];
     app.lineTimes = [];
     app.dailyKey = (extra && extra.dailyKey) || null;
@@ -916,6 +923,8 @@
     app.countdown = { start: performance.now(), stepMs, steps: steps || 3, n: 99, then };
     countdownToken++;
     setScreen('countdown');
+    // Directions still held from the last run (or before pausing) charge now.
+    input.reacquire();
   }
 
   function updateCountdown(now) {
@@ -998,7 +1007,8 @@
 
   function finalizeRun(g, ev) {
     const st = g.stats;
-    const xpBefore = S.playerXP(profile);
+    // XP from achievements earned mid-run belongs to this run's gain.
+    const xpBefore = typeof app.xpStart === 'number' ? Math.min(app.xpStart, S.playerXP(profile)) : S.playerXP(profile);
     const run = {
       score: g.score,
       lines: g.lines,
@@ -1087,17 +1097,16 @@
 
     const secs = g.time / 1000;
     const pps = secs > 0 ? (st.pieces / secs).toFixed(2) : '0.00';
+    // Core stats always; feats only when they happened (no wall of zeros).
     const items = [];
-    if (mode === 'sprint') {
-      items.push(['Lines', g.lines], ['Pieces', st.pieces], ['PPS', pps], ['Tetrises', st.tetrises], ['T-Spins', st.tspins + st.tspinMinis], ['Max combo', Math.max(0, st.maxCombo)]);
-    } else {
-      items.push(['Lines', g.lines], ['Level', g.level], ['Time', fmtTime(g.time)], ['Tetrises', st.tetrises], ['T-Spins', st.tspins + st.tspinMinis], ['Max combo', Math.max(0, st.maxCombo)]);
-    }
-    if (st.perfectClears) items.push(['Perfect clears', st.perfectClears]);
-    if (mode !== 'sprint') items.push(['Pieces', st.pieces], ['PPS', pps]);
+    if (mode === 'sprint') items.push(['Lines', g.lines], ['Pieces', st.pieces], ['PPS', pps]);
+    else items.push(['Lines', g.lines], ['Level', g.level], ['Time', fmtTime(g.time)]);
+    const feats = [['Tetrises', st.tetrises], ['T-Spins', st.tspins + st.tspinMinis], ['Max combo', Math.max(0, st.maxCombo)], ['Perfect clears', st.perfectClears], ['Best B2B', Math.max(0, st.maxB2B)]].filter((f) => f[1] > 0);
+    items.push(...feats);
+    if (mode !== 'sprint') items.push(['PPS', pps], ['Pieces', st.pieces]);
     const dl = $('#res-stats');
     dl.textContent = '';
-    for (const [k, v] of items.slice(0, 9)) {
+    for (const [k, v] of items.slice(0, 6)) {
       const d = document.createElement('div');
       const dt = document.createElement('dt');
       dt.textContent = k;
@@ -1461,7 +1470,6 @@
     const item = toastQueue.shift();
     const t = document.createElement('div');
     t.className = 'toast glass no-lens';
-    t.setAttribute('role', 'status');
     t.innerHTML = '<i><svg aria-hidden="true"><use href="#' + item.icon + '"/></svg></i><span><b></b><small></small></span>';
     $('b', t).textContent = item.title;
     $('small', t).textContent = item.body;
@@ -1585,6 +1593,9 @@
 
     holdView.drawHold(g.holdType, g.holdUsed, app.holdCell);
     nextView.drawQueue(g.queue, app.nextCount, app.nextCell, app.tall);
+    // Screen readers get the pieces as text (read on demand, not announced).
+    setText(els.holdSr, 'holdSr', g.holdType ? g.holdType + ' piece' + (g.holdUsed ? ', used' : '') : 'Empty');
+    setText(els.nextSr, 'nextSr', g.queue.slice(0, app.nextCount).join(', '));
 
     const h = g.state === 'playing' ? g.stackHeight() : 0;
     const danger = h >= 17;
@@ -1691,21 +1702,50 @@
     });
     $$('[data-seg]').forEach((seg) => {
       const key = seg.dataset.seg;
-      const value = key === 'recordsMode' ? app.recordsMode : settings[key];
+      // The material shown is the one actually in use.
+      const value = key === 'recordsMode' ? app.recordsMode : key === 'glass' ? els.root.getAttribute('data-glass') || settings.glass : settings[key];
       $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === value)));
       positionLens(seg);
     });
     $$('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === settings.wallpaper)));
-    const note = $('#glass-note');
-    if (note) {
-      let text = 'Real refraction, rendered on the GPU';
-      if (settings.glass === 'high' && Glass.software) text = 'Liquid needs GPU acceleration here, so Frosted is used';
-      else if (settings.glass === 'high' && !Glass.supported) text = 'Liquid needs WebGL 2, so Frosted is used';
-      else if (perf.degraded) text = 'Lowered automatically to keep play smooth. Pick a material to retry.';
-      note.textContent = text;
-    }
+    refreshGlassUI();
     renderBindings();
     renderSkins();
+  }
+
+  function refreshGlassUI() {
+    const note = $('#glass-note');
+    if (note) note.textContent = glassNote();
+    const seg = $('[data-seg="glass"]');
+    if (!seg) return;
+    const used = els.root.getAttribute('data-glass') || settings.glass;
+    $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === used)));
+    positionLens(seg);
+  }
+
+  function glassNote() {
+    const used = els.root.getAttribute('data-glass');
+    const solidOnly = !!(window.matchMedia && matchMedia('(prefers-reduced-transparency: reduce)').matches);
+    if (used !== settings.glass) {
+      if (solidOnly) return 'Solid, because Reduce Transparency is on in your system settings';
+      if (perf.degraded) return 'Lowered automatically to keep play smooth. Pick a material to try again.';
+      if (settings.glass === 'high' && Glass.software) return 'Liquid needs GPU acceleration, which is off here, so Frosted is used';
+      if (settings.glass === 'high' && Glass.lost) return 'The graphics driver reset, so Frosted is used. Pick Liquid to try again.';
+      if (settings.glass === 'high') return 'Liquid needs WebGL 2, so Frosted is used';
+    }
+    if (used === 'high') return 'Real refraction and light, rendered on the GPU';
+    if (used === 'standard') return 'Blurred glass, lighter on the GPU';
+    return 'Opaque surfaces: best legibility and battery life';
+  }
+
+  /** Brings the menu up to date when the day changes (daily card, streak). */
+  function scheduleMidnight() {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+    setTimeout(() => {
+      if (app.screen === 'menu' && !app.modal) refreshMenu();
+      scheduleMidnight();
+    }, Math.min(next - now, 6 * 3600 * 1000));
   }
 
   let sfxPreviewAt = 0;
@@ -1730,6 +1770,7 @@
       case 'reduceMotion':
       case 'animatedBg':
         applyLook();
+        refreshGlassUI();
         break;
       case 'touch':
         layout();
@@ -1967,6 +2008,7 @@
 
   function startCapture(action, slot, btn) {
     cancelCapture();
+    $('#bind-note').textContent = '';
     app.capture = { action, slot, btn };
     btn.classList.add('is-capturing');
     btn.textContent = 'Press a key';
@@ -1993,9 +2035,12 @@
       return;
     }
     const list = settings.bindings[c.action].slice();
+    let moved = null;
     if (e.code === 'Backspace' || e.code === 'Delete') {
       list.splice(c.slot, 1);
     } else {
+      // A key does one thing: taking it from another action says so.
+      moved = S.ACTIONS.find((a) => a !== c.action && settings.bindings[a].indexOf(e.code) !== -1) || null;
       for (const a of S.ACTIONS) settings.bindings[a] = settings.bindings[a].filter((k) => k !== e.code);
       const fresh = settings.bindings[c.action].slice();
       if (c.slot < fresh.length) fresh[c.slot] = e.code;
@@ -2008,6 +2053,7 @@
     S.saveSettings(settings);
     input.rebuildKeyMap();
     renderBindings();
+    $('#bind-note').textContent = moved ? keyName(e.code) + ' moved from ' + S.ACTION_LABELS[moved] + (settings.bindings[moved].length ? '' : ', which now has no key') + '.' : '';
     Audio.play('select');
     const idx = S.ACTIONS.indexOf(c.action);
     const caps = $$('#bindings .keycap');
@@ -2082,6 +2128,8 @@
   }
 
   function renderRecords() {
+    const seg = $('[data-seg="recordsMode"]');
+    if (seg) $$('button', seg).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === app.recordsMode)));
     renderRecordList();
     const box = $('#ach-list');
     box.textContent = '';
@@ -2205,6 +2253,7 @@
       return;
     }
     const k = e.code;
+    input.noteKey(e);
     if (app.modal) {
       if (k === 'Escape') {
         e.preventDefault();
@@ -2442,11 +2491,29 @@
       Audio.play('select');
       continueRun(app.continueMode);
     });
-    $('#btn-discard').addEventListener('click', () => {
-      if (app.continueMode) discardSave(app.continueMode);
-      Audio.play('back');
-      refreshMenu();
-      focusLater($('.mode-card[data-mode="' + app.mode + '"]'));
+    $('#btn-discard').addEventListener('click', (e) => {
+      const mode = app.continueMode;
+      const done = () => {
+        if (mode) discardSave(mode);
+        Audio.play('back');
+        refreshMenu();
+        focusLater($('.mode-card[data-mode="' + app.mode + '"]'));
+      };
+      const save = mode && S.loadSave(mode);
+      const g = save && save.game;
+      if (g && hasProgress(g.stats && g.stats.pieces)) {
+        confirmAction({
+          title: 'Discard saved ' + MODE_INFO[mode].name + '?',
+          body: 'This run (' + runSummary(g.level, g.score, g.time) + ') will be lost.',
+          ok: 'Discard',
+          cancel: 'Keep it',
+          origin: e.currentTarget,
+          onOk: done,
+          onCancel: () => {},
+        });
+        return;
+      }
+      done();
     });
     window.addEventListener('pagehide', () => saveRun(true));
     $('#btn-res-menu').addEventListener('click', () => quitToMenu());
@@ -2470,18 +2537,20 @@
       if (document.hidden) {
         saveRun(true);
         pause();
-        input.releaseAll();
+        input.releaseAll(true);
         Audio.suspend();
       } else {
         Audio.resume();
         app.last = 0;
         if (app.screen === 'playing' || app.screen === 'countdown') requestWakeLock();
+        if (app.screen === 'menu' && !app.modal) refreshMenu();
       }
     });
     window.addEventListener('blur', () => {
-      input.releaseAll();
+      input.releaseAll(true);
       pause();
     });
+    scheduleMidnight();
 
     let resizeRaf = 0;
     const onResize = () => {
@@ -2498,6 +2567,8 @@
       if (mq.addEventListener) mq.addEventListener('change', onScheme);
       const rm = matchMedia('(prefers-reduced-motion: reduce)');
       if (rm.addEventListener) rm.addEventListener('change', () => applyLook());
+      const rt = matchMedia('(prefers-reduced-transparency: reduce)');
+      if (rt.addEventListener) rt.addEventListener('change', () => applyLook());
     }
     // The artifact host flips data-theme on <html>.
     if (window.MutationObserver) {
@@ -2535,6 +2606,10 @@
     refreshMenu();
     setScreen('menu');
     logo.replay(performance.now());
+    if (!S.available()) {
+      toastQueue.push({ id: 'storage', title: 'Progress won’t be saved', body: 'This browser window is blocking storage, so records and settings reset when you leave.', icon: 'i-lock' });
+      setTimeout(pumpToasts, 900);
+    }
     registerServiceWorker();
     requestAnimationFrame(frame);
     // Debug/test hook (harmless in production).

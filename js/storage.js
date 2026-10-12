@@ -136,6 +136,18 @@
     }
   }
 
+  /** False when progress can't be kept (private mode, blocked site data, full). */
+  function available() {
+    try {
+      const k = 'lgtetris.probe';
+      root.localStorage.setItem(k, '1');
+      root.localStorage.removeItem(k);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function isPlainObject(v) {
     return v !== null && typeof v === 'object' && !Array.isArray(v);
   }
@@ -276,10 +288,18 @@
     if (isPlainObject(saved)) {
       for (const k of Object.keys(p)) {
         if (!(k in saved) || typeof saved[k] !== typeof p[k]) continue;
-        if (typeof p[k] === 'number' && !finite(saved[k])) continue;
+        if (typeof p[k] === 'number' && !(finite(saved[k]) && saved[k] >= 0)) continue;
         p[k] = saved[k];
       }
-      if (!isPlainObject(p.achievements)) p.achievements = {};
+      // Only known achievements with a real unlock time count (they're worth XP).
+      const ach = {};
+      if (isPlainObject(p.achievements)) {
+        for (const a of ACHIEVEMENTS) {
+          const t = p.achievements[a.id];
+          if (finite(t) && t > 0) ach[a.id] = t;
+        }
+      }
+      p.achievements = ach;
     }
     return p;
   }
@@ -292,7 +312,7 @@
 
   function loadSave(mode) {
     const v = load(KEYS.save + mode);
-    return isPlainObject(v) && isPlainObject(v.game) ? v : null;
+    return isPlainObject(v) && isPlainObject(v.game) && v.game.mode === mode ? v : null;
   }
 
   function writeSave(mode, data) {
@@ -363,6 +383,7 @@
     SKINS,
     playerXP,
     levelInfo,
+    available,
     loadSettings,
     saveSettings,
     hasSavedSettings,

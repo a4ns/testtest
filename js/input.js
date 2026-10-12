@@ -20,6 +20,8 @@
     hold: [4, 5, 6, 7],
   };
 
+  const clampMs = (v) => Math.max(0, Math.min(34, v));
+
   class Input {
     constructor(opts) {
       this.settings = opts.settings;
@@ -34,6 +36,10 @@
       this.keyMap = {};
       this.padPrev = {};
       this.padNav = { t: 0, dir: null };
+      // Physical keys currently down, in press order. Survives releaseAll so
+      // a direction still held across a restart or resume is picked back up.
+      this.keysDown = new Set();
+      this.lastUpdate = 0;
       this.rebuildKeyMap();
     }
 
@@ -74,12 +80,28 @@
       }
     }
 
-    releaseAll() {
+    /** Drops every held action. hard: the keys themselves can't be trusted
+     * any more either (focus left the page, so their keyups will be missed). */
+    releaseAll(hard) {
       this.sources = {};
       this.dir = 0;
       this.das = 0;
       this.rep = 0;
       this.softHeld = false;
+      if (hard) this.keysDown.clear();
+      // Gamepad buttons still down count as fresh presses on the next poll.
+      for (const k of Object.keys(this.padPrev)) {
+        const p = this.padPrev[k];
+        for (const a of Object.keys(PAD_MAP)) p[a] = false;
+      }
+    }
+
+    /** Re-presses the movement keys that are still physically held. */
+    reacquire() {
+      for (const code of this.keysDown) {
+        const action = this.keyMap[code];
+        if (action === 'left' || action === 'right' || action === 'soft') this.press(action, 'k:' + code);
+      }
     }
 
     fire(action) {
@@ -89,7 +111,8 @@
         case 'right': {
           const d = action === 'left' ? -1 : 1;
           this.dir = d;
-          this.das = 0;
+          // DAS counts from the moment of the press, not from the next frame.
+          this.das = this.lastUpdate ? -clampMs(performance.now() - this.lastUpdate) : 0;
           this.rep = 0;
           if (game) game.move(d);
           break;
@@ -118,11 +141,12 @@
 
     /** Auto-shift. Call once per frame with the frame time in ms. */
     update(dt) {
+      this.lastUpdate = performance.now();
       this.pollGamepads(dt);
       const game = this.getGame();
       if (!game) {
         // Charge DAS during the countdown so a held direction fires at GO.
-        if (this.dir && this.handlers.canCharge && this.handlers.canCharge()) this.das = Math.min(this.das + dt, this.settings.das);
+        if (this.dir && this.charging()) this.das = Math.min(this.das + dt, this.settings.das);
         return;
       }
       if (!this.dir) return;
@@ -152,9 +176,22 @@
 
     // ---- keyboard ------------------------------------------------------
 
+    charging() {
+      return !!(this.handlers.canCharge && this.handlers.canCharge());
+    }
+
+    /** Tracks physical key state for every keydown, on any screen. */
+    noteKey(e) {
+      if (!this.keyMap[e.code]) return;
+      this.keysDown.delete(e.code);
+      this.keysDown.add(e.code);
+    }
+
     keyDown(e) {
       const action = this.keyMap[e.code];
       if (!action) return false;
+      this.keysDown.delete(e.code);
+      this.keysDown.add(e.code);
       e.preventDefault();
       const src = 'k:' + e.code;
       if (!e.repeat) this.press(action, src);
@@ -165,6 +202,7 @@
     }
 
     keyUp(e) {
+      this.keysDown.delete(e.code);
       const action = this.keyMap[e.code];
       if (!action) return false;
       this.release(action, 'k:' + e.code);
@@ -206,11 +244,25 @@
 
     attachGestures(el) {
       let tr = null;
+      // Displacement over the last ~120 ms decides flicks, so a sideways drag
+      // that ends in a downward flick still hard-drops.
+      const FLICK_MS = 120;
+      const recent = (t, now) => {
+        const h = t.hist;
+        let i = h.length - 1;
+        while (i > 0 && now - h[i - 1].t <= FLICK_MS) i--;
+        return h[i];
+      };
       el.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse' || this.settings.touch !== 'gestures' || tr) return;
+        if (e.pointerType === 'mouse' || this.settings.touch !== 'gestures') return;
         if (e.target.closest && e.target.closest('button, a, input, .touch-pad')) return;
         if (!this.getGame()) return;
         e.preventDefault();
+        if (tr) {
+          // A second finger landing with the first: two-finger tap = 180°.
+          if (!tr.moved && !tr.second && e.timeStamp - tr.t0 < 250) tr.second = e.pointerId;
+          return;
+        }
         if (el.setPointerCapture) {
           try {
             el.setPointerCapture(e.pointerId);
@@ -225,13 +277,9 @@
           t0: e.timeStamp,
           ax: e.clientX,
           ay: e.clientY,
-          lx: e.clientX,
-          ly: e.clientY,
-          lt: e.timeStamp,
-          vx: 0,
-          vy: 0,
+          hist: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
           moved: false,
-          dropped: false,
+          second: null,
         };
       });
 
@@ -239,12 +287,9 @@
         if (!tr || e.pointerId !== tr.id) return;
         const game = this.getGame();
         if (!game) return;
-        const dtm = Math.max(1, e.timeStamp - tr.lt);
-        tr.vx = 0.5 * tr.vx + (0.5 * (e.clientX - tr.lx)) / dtm;
-        tr.vy = 0.5 * tr.vy + (0.5 * (e.clientY - tr.ly)) / dtm;
-        tr.lx = e.clientX;
-        tr.ly = e.clientY;
-        tr.lt = e.timeStamp;
+        tr.hist.push({ x: e.clientX, y: e.clientY, t: e.timeStamp });
+        while (tr.hist.length > 2 && e.timeStamp - tr.hist[1].t > FLICK_MS * 2) tr.hist.shift();
+        if (tr.second) return;
 
         const cell = this.cellPx();
         const sens = this.settings.touchSensitivity || 1;
@@ -259,23 +304,28 @@
           dx -= d * stepX;
           tr.moved = true;
         }
-        const totalDx = Math.abs(e.clientX - tr.x0);
-        const totalDy = e.clientY - tr.y0;
+        // Soft drop while the recent motion is mostly downward.
+        const r = recent(tr, e.timeStamp);
+        const wdx = Math.abs(e.clientX - r.x);
+        const wdy = e.clientY - r.y;
         if (e.clientY < tr.ay) tr.ay = e.clientY;
-        if (totalDy > totalDx * 0.8) {
+        if (wdy > wdx * 0.8) {
           let guard = 40;
           while (e.clientY - tr.ay >= stepY && guard-- > 0) {
             game.softDrop();
             tr.ay += stepY;
             tr.moved = true;
-            tr.dropped = true;
           }
+        } else if (wdx > wdy) {
+          // Sideways again: vertical progress restarts from here.
+          tr.ay = e.clientY;
         }
         if (tr.moved && this.handlers.afterAction) this.handlers.afterAction();
       });
 
       const end = (e) => {
-        if (!tr || e.pointerId !== tr.id) return;
+        if (!tr) return;
+        if (e.pointerId !== tr.id) return;
         const t = tr;
         tr = null;
         if (e.type !== 'pointerup') return;
@@ -284,14 +334,19 @@
         const dt = e.timeStamp - t.t0;
         const dx = e.clientX - t.x0;
         const dy = e.clientY - t.y0;
-        const stale = e.timeStamp - t.lt > 90;
-        const vy = stale ? 0 : t.vy;
-        if (!t.moved && Math.hypot(dx, dy) < 16 && dt < 380) {
+        const r = recent(t, e.timeStamp);
+        const span = Math.max(16, e.timeStamp - r.t);
+        const fdx = e.clientX - r.x;
+        const fdy = e.clientY - r.y;
+        const vy = fdy / span;
+        if (t.second) {
+          if (!t.moved && dt < 450) game.rotate(2);
+        } else if (!t.moved && Math.hypot(dx, dy) < 16 && dt < 380) {
           const rect = el.getBoundingClientRect();
           game.rotate(e.clientX < rect.left + rect.width / 2 ? -1 : 1);
-        } else if (dy > 36 && vy > 0.7 && Math.abs(dy) > Math.abs(dx)) {
+        } else if (fdy > 28 && vy > 0.6 && fdy > Math.abs(fdx) * 1.1) {
           game.hardDrop();
-        } else if (dy < -36 && vy < -0.45 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+        } else if (fdy < -28 && vy < -0.45 && -fdy > Math.abs(fdx) * 1.2) {
           game.hold();
         }
         if (this.handlers.afterAction) this.handlers.afterAction();
@@ -310,7 +365,10 @@
       } catch (e) {
         return;
       }
-      const inGame = !!this.getGame();
+      // During the countdown the pad behaves as in play (a held direction
+      // charges DAS) rather than navigating the hidden menus.
+      const inGame = !!this.getGame() || this.charging();
+      const menuOk = !inGame && (!this.handlers.menuReady || this.handlers.menuReady());
       for (const pad of pads) {
         if (!pad || !pad.connected) continue;
         const btn = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
@@ -334,6 +392,13 @@
           }
         } else {
           for (const a of Object.keys(PAD_MAP)) if (prev[a]) this.release(a, src);
+          if (!menuOk) {
+            this.padNav.dir = null;
+            now.a = btn(0);
+            now.b = btn(1);
+            this.padPrev[pad.index] = now;
+            continue;
+          }
           // Menu navigation with repeat.
           const navDir = now.hard || ay < -0.6 ? 'up' : now.soft ? 'down' : now.left ? 'left' : now.right ? 'right' : null;
           if (navDir && navDir !== this.padNav.dir) {

@@ -749,7 +749,7 @@
         if (L && typeof L === 'object') {
           if (typeof L.timer === 'number' && isFinite(L.timer)) g.lockTimer = clamp(L.timer, 0, g.lockDelay);
           if (int(L.resets)) g.lockResets = clamp(L.resets, 0, g.maxLockResets);
-          if (int(L.lowestY)) g.lowestY = Math.min(L.lowestY, g.active.y);
+          if (int(L.lowestY)) g.lowestY = clamp(Math.max(L.lowestY, g.active.y), 0, ROWS);
           if (typeof L.gravity === 'number' && isFinite(L.gravity)) g.gravityAcc = clamp(L.gravity, 0, 1);
           g.lastWasRotation = L.rotated === true;
           g.lastKickTST = L.tst === true;

@@ -227,8 +227,9 @@
     render(now, dt) {
       const settled = this.energy < 0.002 && Math.abs(this.hue - this.hueTarget) < 0.05 && Math.abs(this.danger - this.dangerTarget) < 0.002;
       if (!this.animated && settled && !this.dirty) return false;
-      // Ambient motion is slow; 30 fps is plenty and halves the glass re-blur cost.
-      if (this.animated && settled && !this.dirty && now - this.lastDraw < 33) return false;
+      // Wallpaper motion (ambient drift and clear pulses) is soft; 30 fps is
+      // plenty and halves the cost of re-uploading it to the glass compositor.
+      if (!this.dirty && now - this.lastDraw < 32) return false;
       const elapsed = this.lastDraw ? now - this.lastDraw : dt;
       this.lastDraw = now;
       this.dirty = false;

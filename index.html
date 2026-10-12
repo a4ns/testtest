@@ -86,6 +86,7 @@
       <section class="glass panel panel-hold" aria-label="Hold piece">
         <h2 class="panel-label">Hold</h2>
         <canvas id="hold-canvas" aria-hidden="true"></canvas>
+        <span class="visually-hidden" id="hold-sr">Empty</span>
       </section>
 
       <section class="glass panel panel-stats" aria-label="Statistics">
@@ -105,6 +106,7 @@
       <section class="glass panel panel-next" aria-label="Next pieces">
         <h2 class="panel-label">Next</h2>
         <canvas id="next-canvas" aria-hidden="true"></canvas>
+        <span class="visually-hidden" id="next-sr"></span>
       </section>
 
       <section class="glass panel panel-goal" id="panel-goal" aria-label="Goal">
@@ -208,25 +210,28 @@
 
     <!-- ========================================================= RESULTS -->
     <section class="screen" id="screen-results" role="dialog" aria-modal="true" aria-labelledby="res-title">
-      <div class="glass sheet">
-        <p class="eyebrow" id="res-mode">Marathon</p>
-        <h2 id="res-title">Game Over</h2>
-        <div class="res-main"><span class="num" id="res-main">0</span><span class="res-main-label" id="res-main-label">points</span></div>
-        <div id="res-badge-slot"></div>
-        <div class="res-unlocks" id="res-unlocks" aria-label="Unlocked this run" hidden></div>
-        <div class="res-xp" id="res-xp">
-          <div class="res-xp-row"><span id="res-xp-level">Level 1</span><span class="num" id="res-xp-gain">+0 XP</span></div>
-          <div class="xp-bar" aria-hidden="true"><i id="res-xp-fill"></i></div>
+      <div class="glass sheet res-sheet">
+        <div class="res-col">
+          <p class="eyebrow" id="res-mode">Marathon</p>
+          <h2 id="res-title">Game Over</h2>
+          <div class="res-main"><span class="num" id="res-main">0</span><span class="res-main-label" id="res-main-label">points</span></div>
+          <div id="res-badge-slot"></div>
+          <div class="res-unlocks" id="res-unlocks" aria-label="Unlocked this run" hidden></div>
+          <div class="res-xp" id="res-xp">
+            <div class="res-xp-row"><span id="res-xp-level">Level 1</span><span class="num" id="res-xp-gain">+0 XP</span></div>
+            <div class="xp-bar" aria-hidden="true"><i id="res-xp-fill"></i></div>
+            <p class="res-next" id="res-next"></p>
+          </div>
         </div>
-        <dl class="res-stats" id="res-stats"></dl>
-        <ol class="board-list" id="res-board" aria-label="Personal leaderboard"></ol>
-        <div class="res-share">
-          <button class="btn glass btn-small" type="button" id="btn-res-share"><svg aria-hidden="true"><use href="#i-share" /></svg>Share result</button>
+        <div class="res-col">
+          <dl class="res-stats" id="res-stats"></dl>
+          <ol class="board-list" id="res-board" aria-label="Personal leaderboard"></ol>
           <span class="res-share-note" id="res-share-note" aria-live="polite"></span>
-        </div>
-        <div class="sheet-actions row">
-          <button class="btn glass" type="button" id="btn-res-menu"><svg aria-hidden="true"><use href="#i-home" /></svg>Menu</button>
-          <button class="btn btn-primary glass" type="button" id="btn-res-again"><svg aria-hidden="true"><use href="#i-restart" /></svg>Play again</button>
+          <div class="sheet-actions row res-actions">
+            <button class="btn glass" type="button" id="btn-res-menu"><svg aria-hidden="true"><use href="#i-home" /></svg>Menu</button>
+            <button class="icon-btn glass res-share-btn" type="button" id="btn-res-share" aria-label="Share result" title="Share result"><svg aria-hidden="true"><use href="#i-share" /></svg></button>
+            <button class="btn btn-primary glass" type="button" id="btn-res-again"><svg aria-hidden="true"><use href="#i-restart" /></svg>Play again</button>
+          </div>
         </div>
       </div>
     </section>
@@ -293,13 +298,14 @@
         <div class="tab-panel" role="tabpanel" id="panel-controls" aria-labelledby="tab-controls" hidden>
           <p class="group-title">Keyboard</p>
           <div class="rows" id="bindings"></div>
+          <p class="note bind-note" id="bind-note" role="status" aria-live="polite"></p>
           <p class="note">Click a key to change it, then press the new key. <kbd>Backspace</kbd> clears it. <kbd>Esc</kbd>/<kbd>P</kbd> pause and <kbd>R</kbd> restarts.</p>
           <div class="sheet-actions"><button class="btn glass" type="button" id="btn-reset-keys">Reset keys</button></div>
           <p class="group-title">Touch</p>
           <div class="rows">
             <div class="row">
               <div class="row-label"><span id="lbl-touch">Touch controls</span></div>
-              <div class="segmented" data-seg="touch" aria-labelledby="lbl-touch">
+              <div class="segmented" role="group" data-seg="touch" aria-labelledby="lbl-touch">
                 <span class="seg-lens" aria-hidden="true"></span>
                 <button type="button" data-value="gestures">Gestures</button>
                 <button type="button" data-value="buttons">Buttons</button>
@@ -329,7 +335,7 @@
             </div>
             <div class="row">
               <div class="row-label"><span id="lbl-track">Soundtrack</span></div>
-              <div class="segmented" data-seg="track" aria-labelledby="lbl-track">
+              <div class="segmented" role="group" data-seg="track" aria-labelledby="lbl-track">
                 <span class="seg-lens" aria-hidden="true"></span>
                 <button type="button" data-value="glass">Glass Garden</button>
                 <button type="button" data-value="classic">Korobeiniki</button>
@@ -350,7 +356,7 @@
           <div class="rows">
             <div class="row">
               <div class="row-label"><span id="lbl-glass">Material</span><small id="glass-note">Liquid renders real refraction with WebGL</small></div>
-              <div class="segmented" data-seg="glass" aria-labelledby="lbl-glass">
+              <div class="segmented" role="group" data-seg="glass" aria-labelledby="lbl-glass">
                 <span class="seg-lens" aria-hidden="true"></span>
                 <button type="button" data-value="high">Liquid</button>
                 <button type="button" data-value="standard">Frosted</button>
@@ -430,7 +436,7 @@
           <button type="button" role="tab" id="tab-r-life" aria-controls="panel-r-life" aria-selected="false" tabindex="-1">Lifetime</button>
         </div>
         <div class="tab-panel" role="tabpanel" id="panel-r-best" aria-labelledby="tab-r-best">
-          <div class="segmented" data-seg="recordsMode" aria-label="Mode">
+          <div class="segmented" role="group" data-seg="recordsMode" aria-label="Mode">
             <span class="seg-lens" aria-hidden="true"></span>
             <button type="button" data-value="marathon">Marathon</button>
             <button type="button" data-value="sprint">Sprint</button>

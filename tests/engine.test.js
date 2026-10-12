@@ -473,3 +473,14 @@ test('restore keeps lock-delay state', () => {
   assert.equal(r.lockTimer, g.lockTimer);
   assert.ok(r.lockResets >= 6);
 });
+
+test('restore keeps the deepest row reached, so a kick upward cannot refresh resets', () => {
+  const g = new Game({ seed: 4 });
+  g.start();
+  g.active = { type: 'T', rot: 0, x: 3, y: 30 };
+  g.lowestY = 34;
+  g.lockResets = 9;
+  const r = Game.restore(JSON.parse(JSON.stringify(g.serialize())));
+  assert.equal(r.lowestY, 34);
+  assert.equal(r.lockResets, 9);
+});
