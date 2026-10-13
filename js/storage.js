@@ -127,11 +127,36 @@
     { id: 'gold', name: 'Gold', score: 20000 },
   ];
 
+  // The Daily Challenge changes its rules from day to day (same for everyone
+  // on a given day). scale: medal targets relative to the classic rules.
+  const DAILY_VARIANTS = [
+    { id: 'classic', name: 'Classic', desc: 'Two minutes. Score as much as you can.', scale: 1 },
+    { id: 'fast', name: 'Fast start', desc: 'Two minutes from level 8. Hold on tight.', startLevel: 8, scale: 1.6 },
+    { id: 'cheese', name: 'Cheese', desc: 'Two minutes with six rows of garbage to dig.', garbage: 6, scale: 0.9 },
+    { id: 'nohold', name: 'No hold', desc: 'Two minutes, and no hold. Every piece counts.', noHold: true, scale: 0.85 },
+  ];
+
+  function dailyVariant(key) {
+    let h = 2166136261 >>> 0;
+    const str = 'variant:' + key;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return DAILY_VARIANTS[h % DAILY_VARIANTS.length];
+  }
+
+  /** Medal targets for a day's rules (rounded to tidy numbers). */
+  function dailyMedals(key) {
+    const scale = key ? dailyVariant(key).scale : 1;
+    return DAILY_MEDALS.map((m) => Object.assign({}, m, { score: Math.round((m.score * scale) / 500) * 500 }));
+  }
+
   /** The best medal a daily score earns (or null), and the next one to aim for. */
-  function dailyMedal(score) {
+  function dailyMedal(score, key) {
     let got = null;
     let next = null;
-    for (const m of DAILY_MEDALS) {
+    for (const m of dailyMedals(key)) {
       if (score >= m.score) got = m;
       else if (!next) next = m;
     }
@@ -179,11 +204,15 @@
   }
 
   let onWriteFail = null;
+  // Once a write has failed, the stored copies may be missing this session's
+  // progress, so from then on the in-memory state is the one to trust.
+  let writeFailed = false;
   function save(key, value) {
     try {
       root.localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
+      writeFailed = true;
       if (onWriteFail) onWriteFail(key);
       return false;
     }
@@ -308,14 +337,16 @@
     return b.score - a.score || b.lines - a.lines;
   }
 
-  /** Inserts a run; returns its 1-based rank, or 0 if it didn't place. */
-  /** Another tab may have written since we loaded: take its view first. */
+  /** Another tab may have written since we loaded: take its view first
+   * (unless our own writes have been failing, when ours is the truth). */
   function syncInto(target, fresh) {
+    if (writeFailed) return target;
     for (const k of Object.keys(target)) if (!(k in fresh)) delete target[k];
     Object.assign(target, fresh);
     return target;
   }
 
+  /** Inserts a run; returns its 1-based rank, or 0 if it didn't place. */
   function addRecord(records, mode, run) {
     syncInto(records, loadRecords());
     const list = records[mode] || (records[mode] = []);
@@ -415,10 +446,11 @@
 
   function loadDaily() {
     const v = load(KEYS.daily);
-    const out = { days: {}, streak: 0, lastDay: '', freezes: 0, frozeOn: '' };
+    const out = { days: {}, streak: 0, lastDay: '', freezes: 0, frozeOn: '', frozenDays: [] };
     if (isPlainObject(v)) {
       if (finite(v.freezes)) out.freezes = Math.min(MAX_FREEZES, Math.floor(v.freezes));
       if (typeof v.frozeOn === 'string') out.frozeOn = v.frozeOn;
+      if (Array.isArray(v.frozenDays)) out.frozenDays = v.frozenDays.filter((k) => typeof k === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(k)).slice(-14);
       if (isPlainObject(v.days)) {
         for (const k of Object.keys(v.days)) if (/^\d{4}-\d{2}-\d{2}$/.test(k) && finite(v.days[k])) out.days[k] = v.days[k];
       }
@@ -433,15 +465,36 @@
   const MAX_FREEZES = 2;
 
   /** Records a finished daily run; returns the updated daily state. */
+  /** Days skipped between the last daily played and `key` (0 = consecutive),
+   * or Infinity if it's longer ago than a freeze could ever cover. */
+  function missedBefore(lastDay, key) {
+    let d = previousDay(key);
+    for (let n = 0; n <= MAX_FREEZES; n++) {
+      if (d === lastDay) return n;
+      d = previousDay(d);
+    }
+    return Infinity;
+  }
+
   function recordDaily(daily, key, score) {
     daily.days[key] = Math.max(daily.days[key] || 0, score);
+    daily.covered = 0;
     if (daily.lastDay !== key) {
-      const yesterday = previousDay(key);
-      if (daily.lastDay === yesterday) {
+      const missed = daily.lastDay ? missedBefore(daily.lastDay, key) : Infinity;
+      if (missed === 0) {
         daily.streak += 1;
-      } else if (daily.lastDay === previousDay(yesterday) && daily.freezes > 0) {
-        daily.freezes -= 1;
-        daily.frozeOn = yesterday;
+      } else if (missed <= daily.freezes) {
+        // Banked freezes cover every day that was missed.
+        daily.freezes -= missed;
+        let d = previousDay(key);
+        const frozen = Array.isArray(daily.frozenDays) ? daily.frozenDays : [];
+        for (let i = 0; i < missed; i++) {
+          frozen.push(d);
+          d = previousDay(d);
+        }
+        daily.frozenDays = frozen.slice(-14);
+        daily.frozeOn = previousDay(key);
+        daily.covered = missed;
         daily.streak += 1;
       } else {
         daily.streak = 1;
@@ -459,10 +512,11 @@
   /** The streak still counts if the last daily was today or yesterday, or
    * the day before with a freeze banked to cover the gap. */
   function liveStreak(daily, today) {
-    const yesterday = previousDay(today);
-    if (daily.lastDay === today || daily.lastDay === yesterday) return daily.streak;
-    if (daily.freezes > 0 && daily.lastDay === previousDay(yesterday)) return daily.streak;
-    return 0;
+    if (!daily.lastDay) return 0;
+    if (daily.lastDay === today) return daily.streak;
+    // Days already gone by without a daily, not counting today.
+    const missed = missedBefore(daily.lastDay, today);
+    return missed <= daily.freezes ? daily.streak : 0;
   }
 
   // ---- recent results (for "vs your recent average") -------------------
@@ -503,6 +557,9 @@
     tierFor,
     available,
     DAILY_MEDALS,
+    DAILY_VARIANTS,
+    dailyVariant,
+    dailyMedals,
     dailyMedal,
     loadSettings,
     saveSettings,

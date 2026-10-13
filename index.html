@@ -149,6 +149,7 @@
           <span class="player-level" id="player-level">Level 1</span>
           <span class="xp-bar" aria-hidden="true"><i id="player-fill"></i></span>
           <span class="player-xp num" id="player-xp">0 / 500 XP</span>
+          <span class="tier-ring" aria-hidden="true"></span>
         </button>
         <div class="glass continue" id="continue" hidden>
           <button class="continue-main" type="button" id="btn-continue">
@@ -160,8 +161,8 @@
         <div class="mode-grid">
           <button class="glass mode-card mode-daily" type="button" data-mode="daily" style="--tint: #ffb340">
             <span class="mode-icon" aria-hidden="true"><svg><use href="#i-calendar" /></svg></span>
-            <span class="mode-name">Daily Challenge <span class="daily-date" id="daily-date"></span></span>
-            <span class="mode-desc">Today’s pieces, the same for everyone. Two minutes. Come back tomorrow for new ones.</span>
+            <span class="mode-name">Daily Challenge <span class="daily-date" id="daily-date"></span> <span class="daily-rule" id="daily-rule"></span></span>
+            <span class="mode-desc" id="daily-desc">Today’s pieces, the same for everyone. Two minutes. Come back tomorrow for new ones.</span>
             <span class="daily-week" id="daily-week" aria-hidden="true"></span>
             <span class="mode-best"><span id="daily-streak">Today’s best</span><b data-best="daily">—</b></span>
           </button>

@@ -537,3 +537,18 @@ test('dig mode starts with ten garbage rows, one hole each, and ends when they a
   assert.equal(g.state, 'won');
   assert.equal(g.endReason, 'cleared');
 });
+
+test('daily variants: forced start level, starting garbage, no hold', () => {
+  const fast = new Game({ mode: 'daily', seed: 5, startLevel: 8, forceStartLevel: true });
+  assert.equal(fast.level, 8);
+  const cheese = new Game({ mode: 'daily', seed: 5, garbage: 6 });
+  assert.equal(cheese.board[E.ROWS - 1].filter((v) => v === E.GARBAGE_ID).length, 9);
+  assert.ok(cheese.board[E.ROWS - 7].every((v) => v === 0));
+  cheese.start();
+  assert.equal(cheese.state, 'playing');
+  const nohold = new Game({ mode: 'daily', seed: 5, noHold: true });
+  nohold.start();
+  assert.equal(nohold.hold(), false);
+  // Without the flag a non-marathon mode ignores startLevel as before.
+  assert.equal(new Game({ mode: 'ultra', startLevel: 8 }).level, 1);
+});

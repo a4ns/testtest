@@ -97,11 +97,16 @@
       }
     }
 
-    /** Re-presses the movement keys that are still physically held. */
+    /** Picks back up the keys still physically held: movement is pressed
+     * again; hold and rotations are marked held (not fired), so initial
+     * hold/rotation can apply them at GO. Hard drop never carries over. */
     reacquire() {
       for (const code of this.keysDown) {
         const action = this.keyMap[code];
         if (action === 'left' || action === 'right' || action === 'soft') this.press(action, 'k:' + code);
+        else if (action === 'hold' || action === 'cw' || action === 'ccw' || action === 'r180') {
+          (this.sources[action] || (this.sources[action] = new Set())).add('k:' + code);
+        }
       }
     }
 
@@ -383,22 +388,33 @@
       for (const pad of pads) {
         if (!pad || !pad.connected) continue;
         const btn = (i) => !!(pad.buttons[i] && pad.buttons[i].pressed);
-        const ax = pad.axes[0] || 0;
-        const ay = pad.axes[1] || 0;
+        // Only the stick's dominant axis counts (a diagonal isn't two inputs).
+        const rx = pad.axes[0] || 0;
+        const ry = pad.axes[1] || 0;
+        const ax = Math.abs(rx) >= Math.abs(ry) ? rx : 0;
+        const ay = Math.abs(ry) > Math.abs(rx) ? ry : 0;
         const prev = this.padPrev[pad.index] || (this.padPrev[pad.index] = {});
         const now = {};
         for (const a of Object.keys(PAD_MAP)) now[a] = PAD_MAP[a].some(btn);
         now.left = now.left || ax < -0.55;
         now.right = now.right || ax > 0.55;
         now.soft = now.soft || ay > 0.6;
-        now.pause = btn(9) || btn(8);
+        now.pause = btn(9);
+        now.restart = btn(8);
         const src = 'g:' + pad.index;
 
         if (now.pause && !prev.pause && this.handlers.pause) this.handlers.pause();
+        // Back/View: instant retry (saved runs still ask first).
+        if (now.restart && !prev.restart && this.handlers.restart) this.handlers.restart();
 
         if (inGame) {
           for (const a of Object.keys(PAD_MAP)) {
-            if (now[a] && !prev[a]) this.press(a, src);
+            if (now[a] && !prev[a]) {
+              this.press(a, src);
+              // The press happened somewhere in the frame this update covers
+              // (on average halfway), not at its end: DAS counts from there.
+              if ((a === 'left' || a === 'right') && this.sources[a].size === 1) this.das = -dt / 2;
+            }
             else if (!now[a] && prev[a]) this.release(a, src);
           }
         } else {

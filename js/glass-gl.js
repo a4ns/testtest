@@ -139,7 +139,8 @@ void main() {
     lum = max(lum, dot(sm, vec3(0.2126, 0.7152, 0.0722)));
   }
   // The rim band is spared some dimming so its refraction stays visible.
-  float spare = 1.0 - 0.55 * lens;
+  // Only the outer edge of the band: the body stays evenly toned (no dark core).
+  float spare = 1.0 - 0.55 * smoothstep(0.55, 1.0, lens);
   if (uLight > 0.5) {
     // Dark text: lift the backdrop toward white until it is bright enough.
     float need = clamp((0.5 - lum) / max(1.0 - lum, 0.05), 0.0, 1.0);
@@ -499,7 +500,8 @@ void main() {
       gl.uniform1f(pg.u.uOpacity, op);
       gl.uniform1f(pg.u.uLod, m.lod + Math.log2(dpr));
       gl.uniform1f(pg.u.uRefract, m.refract * dpr);
-      gl.uniform1f(pg.u.uBand, Math.min(m.band, Math.min(r.width, r.height) * 0.5) * dpr);
+      // Small controls get a band in proportion, so the lens doesn't fill them.
+      gl.uniform1f(pg.u.uBand, Math.min(m.band, Math.min(r.width, r.height) * (m === MATERIALS.control ? 0.28 : 0.5)) * dpr);
       gl.uniform1f(pg.u.uDim, m.dim[s]);
       gl.uniform1f(pg.u.uTint, m.tint[s]);
       gl.uniform1f(pg.u.uGlow, glow);

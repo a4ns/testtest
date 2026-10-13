@@ -210,3 +210,30 @@ test('daily bonus XP counts toward the player level', () => {
   const p = { lines: 0, tetrises: 0, tspins: 0, perfectClears: 0, games: 0, achievements: {}, bonusXP: 350 };
   assert.equal(S.playerXP(p), 350);
 });
+
+test('two banked freezes cover a two-day absence', () => {
+  mem.clear();
+  let d = S.loadDaily();
+  for (let i = 1; i <= 14; i++) d = S.recordDaily(d, '2026-09-' + String(i).padStart(2, '0'), 500);
+  assert.equal(d.streak, 14);
+  assert.equal(d.freezes, 2);
+  // Missed the 15th and 16th: still alive on the 17th, and playing uses both.
+  assert.equal(S.liveStreak(d, '2026-09-17'), 14);
+  d = S.recordDaily(d, '2026-09-17', 500);
+  assert.equal(d.streak, 15);
+  assert.equal(d.freezes, 0);
+  assert.equal(d.covered, 2);
+  assert.deepEqual(d.frozenDays.slice().sort(), ['2026-09-15', '2026-09-16']);
+  // Three days away with no freezes left: gone.
+  assert.equal(S.liveStreak(d, '2026-09-21'), 0);
+});
+
+test('daily variants are deterministic and scale medal targets', () => {
+  assert.equal(S.dailyVariant('2026-10-13').id, S.dailyVariant('2026-10-13').id);
+  const ids = new Set();
+  for (let d = 1; d <= 28; d++) ids.add(S.dailyVariant('2026-02-' + String(d).padStart(2, '0')).id);
+  assert.ok(ids.size >= 3);
+  const fastDay = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13'].find((k) => S.dailyVariant(k).id === 'fast');
+  if (fastDay) assert.ok(S.dailyMedals(fastDay)[2].score > S.DAILY_MEDALS[2].score);
+  assert.equal(S.dailyMedal(12000).got.id, 'silver');
+});

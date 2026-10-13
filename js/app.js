@@ -136,6 +136,15 @@
     cellPx: () => app.cell,
     handlers: {
       pause: () => togglePause(),
+      restart: () => {
+        if (app.modal) return;
+        if (app.screen === 'playing' || app.screen === 'countdown' || app.screen === 'paused') {
+          if (SAVE_MODES.indexOf(app.mode) !== -1) {
+            if (app.screen !== 'paused') pause();
+            requestRestart($('#btn-restart'));
+          } else restart();
+        } else if (app.screen === 'results' && performance.now() - app.resultsShownAt > 600) restart();
+      },
       menuNav: (dir) => spatialNav(dir),
       menuSelect: () => {
         const el = document.activeElement;
@@ -369,7 +378,7 @@
       nextView.resize(Math.round(mini * 4.4), Math.round(mini * (3.3 + 2.7 * (app.nextCount - 1))), dpr);
     }
 
-    const logoCell = clamp(Math.floor(Math.min((Math.min(vw - 48, 560)) / 24, (vh * (vh < 860 ? 0.115 : 0.14)) / 5.5)), 6, 22);
+    const logoCell = clamp(Math.floor(Math.min((Math.min(vw - 48, 560)) / 24, (vh * (vh < 860 ? 0.1 : 0.14)) / 5.5)), 6, 22);
     logo.resize(logoCell, dpr);
     wall.resize();
     app.hud = {};
@@ -512,7 +521,7 @@
     sheet.style.opacity = '0';
     void blob.offsetWidth;
     blob.style.transition =
-      ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' 0.36s ' + MORPH_EASE).join(', ') + ', opacity 0.14s ease-in 0.24s';
+      ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' 0.36s ' + MORPH_EASE).join(', ') + ', opacity 0.16s ease-in 0.1s';
     placeBlob(blob, to, radiusOf(origin, to));
     blob.style.opacity = '0';
     m.timers.push(
@@ -708,8 +717,11 @@
     const today = S.dayKey();
     daily = S.loadDaily();
     $('#daily-date').textContent = prettyDay(today);
+    const variant = S.dailyVariant(today);
+    $('#daily-rule').textContent = variant.name;
+    $('#daily-desc').textContent = variant.desc + ' Same pieces for everyone.';
     const todayBest = daily.days[today];
-    const medal = S.dailyMedal(todayBest || 0);
+    const medal = S.dailyMedal(todayBest || 0, today);
     const bestEl = $('[data-best="daily"]');
     bestEl.textContent = todayBest != null ? fmtInt(todayBest) + (medal.got ? ' · ' + medal.got.name : '') : 'Not played yet';
     bestEl.className = medal.got ? 'medal-' + medal.got.id : '';
@@ -746,8 +758,9 @@
     for (const d of days) {
       const dot = document.createElement('i');
       const sc = daily.days[d];
-      const m = sc != null ? S.dailyMedal(sc).got : null;
-      dot.className = (sc != null ? 'is-played' : '') + (m ? ' medal-' + m.id : '') + (d === today ? ' is-today' : '');
+      const m = sc != null ? S.dailyMedal(sc, d).got : null;
+      const frozen = sc == null && Array.isArray(daily.frozenDays) && daily.frozenDays.indexOf(d) !== -1;
+      dot.className = (sc != null ? 'is-played' : '') + (frozen ? ' is-frozen' : '') + (m ? ' medal-' + m.id : '') + (d === today ? ' is-today' : '');
       week.appendChild(dot);
     }
     $('.mode-daily').setAttribute(
@@ -784,6 +797,23 @@
   // ------------------------------------------------------ saves & lifetime
 
   let lastSaveAt = 0;
+  // Identifies this tab as the owner of the saved run it is playing.
+  const TAB_ID = Math.random().toString(36).slice(2, 10);
+
+  /** True if another tab has since continued the saved run this tab holds. */
+  function runTakenElsewhere(g) {
+    if (!g || SAVE_MODES.indexOf(g.mode) === -1 || !app.ownsSave) return false;
+    const d = S.loadSave(g.mode);
+    return !!(d && d.owner && d.owner !== TAB_ID);
+  }
+
+  /** The run continues in another tab: this copy steps aside unrecorded. */
+  function yieldRun() {
+    app.game = null;
+    quitToMenu();
+    storageNotice('This run is being played in another tab.');
+  }
+
   /** Returns false only when a save was attempted and storage refused it. */
   function saveRun(force) {
     const g = app.game;
@@ -792,7 +822,12 @@
     const now = performance.now();
     if (!force && now - lastSaveAt < 2000) return true;
     lastSaveAt = now;
-    return S.writeSave(g.mode, { game: g.serialize(), savedAt: Date.now(), unlocks: app.runUnlocks.slice() });
+    if (runTakenElsewhere(g)) {
+      setTimeout(yieldRun, 0);
+      return true;
+    }
+    app.ownsSave = true;
+    return S.writeSave(g.mode, { game: g.serialize(), savedAt: Date.now(), unlocks: app.runUnlocks.slice(), owner: TAB_ID });
   }
 
   function gameTotals(g) {
@@ -885,6 +920,7 @@
     app.endInfo = null;
     app.hardDropping = false;
     app.runUnlocks = (extra && extra.unlocks) || [];
+    app.ownsSave = false;
     app.xpStart = S.playerXP(profile);
     app.splits = [];
     app.lineTimes = [];
@@ -909,7 +945,7 @@
     app.pbBeaten = false;
     app.marathonDone = g.mode === 'marathon' && g.lines >= 150;
     showKeysHint(g);
-    $('#pause-mode').textContent = MODE_INFO[g.mode].name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
+    $('#pause-mode').textContent = MODE_INFO[g.mode].name + (app.dailyKey ? ' · ' + S.dailyVariant(app.dailyKey).name : '');
     $('#btn-quit').lastChild.textContent = g.mode === 'zen' ? 'End session' : g.mode === 'marathon' ? 'Save & quit' : 'Main menu';
   }
 
@@ -983,6 +1019,14 @@
     if (mode === 'daily') {
       dailyKey = S.dayKey();
       opts.seed = E.hashSeed('daily:' + dailyKey);
+      // Today's rules.
+      const v = S.dailyVariant(dailyKey);
+      if (v.startLevel) {
+        opts.startLevel = v.startLevel;
+        opts.forceStartLevel = true;
+      }
+      if (v.garbage) opts.garbage = v.garbage;
+      if (v.noHold) opts.noHold = true;
     }
     beginGame(new E.Game(opts), { dailyKey });
 
@@ -1022,6 +1066,10 @@
     if (input.isHeld('r180')) g.rotate(2);
     else if (input.isHeld('cw')) g.rotate(1);
     else if (input.isHeld('ccw')) g.rotate(-1);
+    // A direction tapped just before GO (DAS not yet charged) still moves once.
+    if (input.dir && input.das < settings.das) g.move(input.dir);
+    // GO's own frame doesn't count toward the clock or gravity.
+    app.skipFrame = true;
   }
 
   function continueRun(mode) {
@@ -1034,6 +1082,9 @@
     }
     const unlocks = Array.isArray(data.unlocks) ? data.unlocks.filter((id) => typeof id === 'string') : [];
     beginGame(g, { unlocks });
+    // Claim the saved run, so a copy continued in another tab knows to stand down.
+    S.writeSave(mode, Object.assign({}, data, { owner: TAB_ID, savedAt: Date.now() }));
+    app.ownsSave = true;
     // Already past the record before saving: that moment has been had.
     app.pbBeaten = !!app.pbScore && g.score > app.pbScore;
     startCountdown(400, () => {
@@ -1217,9 +1268,11 @@
       if (app.lineTimes.length >= 40) run.lineTimes = app.lineTimes.slice(0, 40);
     }
     if (g.mode === 'daily') run.day = app.dailyKey || S.dayKey();
-    const eligible = isRace(g.mode) ? ev.result === 'cleared' : g.score > 0 || g.lines > 0;
+    // A saved run another tab has since continued is recorded there, not twice.
+    const taken = runTakenElsewhere(g);
+    const eligible = !taken && (isRace(g.mode) ? ev.result === 'cleared' : g.score > 0 || g.lines > 0);
     const rank = eligible ? S.addRecord(records, g.mode, run) : 0;
-    if (SAVE_MODES.indexOf(g.mode) !== -1) S.clearSave(g.mode);
+    if (SAVE_MODES.indexOf(g.mode) !== -1 && !taken) S.clearSave(g.mode);
     app.dailyReward = null;
     if (g.mode === 'daily' && ev.result !== 'ended') {
       const before = S.loadDaily();
@@ -1228,8 +1281,8 @@
       daily = S.recordDaily(before, run.day, g.score);
       const first = prevDayBest == null;
       const medalXP = (m) => (m ? DAILY_XP.medal[m.id] : 0);
-      const oldMedal = prevDayBest == null ? null : S.dailyMedal(prevDayBest).got;
-      const newMedal = S.dailyMedal(daily.days[run.day]).got;
+      const oldMedal = prevDayBest == null ? null : S.dailyMedal(prevDayBest, run.day).got;
+      const newMedal = S.dailyMedal(daily.days[run.day], run.day).got;
       let bonus = Math.max(0, medalXP(newMedal) - medalXP(oldMedal));
       if (first) bonus += DAILY_XP.first + Math.min(DAILY_XP.maxStreakBonus, DAILY_XP.perStreakDay * daily.streak);
       S.updateProfile(profile, (p) => {
@@ -1240,8 +1293,8 @@
         bonus,
         medalUp: newMedal && newMedal !== oldMedal ? newMedal : null,
         milestone: first && STREAK_MILESTONES.indexOf(daily.streak) !== -1 ? daily.streak : 0,
-        froze: first && daily.frozeOn === S.previousDay(run.day),
-        freezeEarned: first && daily.freezes > freezesBefore - (daily.frozeOn === S.previousDay(run.day) ? 1 : 0),
+        froze: first ? daily.covered || 0 : 0,
+        freezeEarned: first && daily.freezes > freezesBefore - (daily.covered || 0),
         freezesFull: first && daily.streak % 7 === 0 && daily.freezes >= S.MAX_FREEZES,
       };
     }
@@ -1250,7 +1303,7 @@
     const recentAvg = recentList.length >= 3 ? recentList.reduce((a, b) => a + b, 0) / recentList.length : null;
     if (eligible && ev.result !== 'ended') recent = S.pushRecent(recent, g.mode, isRace(g.mode) ? run.time : run.score);
 
-    addLifetime(Object.assign(gameTotals(g), { finished: ev.result === 'cleared' || ev.result === 'timeup' }));
+    if (!taken) addLifetime(Object.assign(gameTotals(g), { finished: ev.result === 'cleared' || ev.result === 'timeup' }));
     checkAchievements(true, ev);
     return { run, rank, prevBest, result: ev.result, eligible, recentAvg, xpBefore, xpAfter: S.playerXP(profile) };
   }
@@ -1333,14 +1386,14 @@
     }
     if (mode === 'daily' && info.result !== 'ended') {
       const dayBest = daily.days[info.run.day] || g.score;
-      const medal = S.dailyMedal(dayBest);
+      const medal = S.dailyMedal(dayBest, info.run.day);
       const rw = app.dailyReward;
       if (medal.got) line(medal.got.name + ' medal' + (rw && rw.medalUp ? ' won' : ' today') + (medal.next ? ' · ' + fmtInt(medal.next.score - dayBest) + ' to ' + medal.next.name : ''), 'medal medal-' + medal.got.id);
       else if (medal.next) line(fmtInt(medal.next.score - dayBest) + ' more for ' + medal.next.name, 'medal');
-      if (rw && rw.bonus) line('+' + fmtInt(rw.bonus) + ' XP daily bonus' + (rw.first && daily.streak > 1 ? ' (streak ×' + Math.min(10, daily.streak) + ')' : ''), 'is-up');
+      if (rw && rw.bonus) line('+' + fmtInt(rw.bonus) + ' XP daily bonus' + (rw.first && daily.streak > 1 ? ' (includes +' + Math.min(DAILY_XP.maxStreakBonus, DAILY_XP.perStreakDay * daily.streak) + ' for your streak)' : ''), 'is-up');
       if (rw && rw.milestone) line(rw.milestone + '-day streak! Keep it alive tomorrow.', 'milestone');
       else line(daily.streak > 1 ? daily.streak + '-day streak · new pieces tomorrow' : 'New pieces tomorrow');
-      if (rw && rw.froze) line('A streak freeze covered the day you missed.');
+      if (rw && rw.froze) line(rw.froze > 1 ? rw.froze + ' streak freezes covered the days you missed.' : 'A streak freeze covered the day you missed.');
       else if (rw && rw.freezeEarned) line('Streak freeze earned: one missed day won’t break your streak.');
       else if (rw && rw.freezesFull) line('Streak freezes full (' + S.MAX_FREEZES + '/' + S.MAX_FREEZES + ').');
     }
@@ -1421,6 +1474,28 @@
           unlocks.appendChild(c2);
         }
       }
+      // New wallpapers can be put on from here too.
+      for (const key of Object.keys(WP.WALLPAPERS)) {
+        const w = WP.WALLPAPERS[key];
+        if (!(w.level > before.level && w.level <= after.level)) continue;
+        const c3 = document.createElement('button');
+        c3.type = 'button';
+        c3.className = 'unlock-chip is-action';
+        const label = () => {
+          const on = settings.wallpaper === key;
+          c3.innerHTML = '<svg aria-hidden="true"><use href="#' + (on ? 'i-check' : 'i-sliders') + '"/></svg>';
+          c3.appendChild(document.createTextNode(on ? 'Using ' + w.name : 'Use ' + w.name + ' wallpaper'));
+          c3.setAttribute('aria-pressed', String(on));
+        };
+        label();
+        c3.addEventListener('click', () => {
+          settings.wallpaper = key;
+          commit('wallpaper');
+          Audio.play('select');
+          label();
+        });
+        unlocks.appendChild(c3);
+      }
     }
     unlocks.hidden = !unlocks.children.length;
     if (app.runUnlocks.length || extra) setTimeout(() => Audio.play('achievement'), 450);
@@ -1463,7 +1538,7 @@
     if (feats.length) out.push(feats.join(' · '));
     if (g.mode === 'daily' && daily.streak > 1) out.push(daily.streak + '-day streak');
     if (g.mode === 'daily') {
-      const m = S.dailyMedal(g.score).got;
+      const m = S.dailyMedal(g.score, info.run.day).got;
       if (m) out.push(m.name + ' medal');
     }
     // Link back to the game when it's hosted somewhere others can open.
@@ -1548,7 +1623,8 @@
           Audio.setLevel(ev.level);
           wall.setLevel(ev.level);
           Audio.play('levelUp');
-          callout('LEVEL ' + ev.level, null, 'level');
+          // A level reached by a big clear rides along on its callout.
+          if (!appendToLatestCallout('LEVEL ' + ev.level)) callout('LEVEL ' + ev.level, null, 'level');
           wall.pulse(0.7);
           checkAchievements(false);
           break;
@@ -1565,7 +1641,6 @@
     }
   }
 
-  /** Passing your best score mid-run gets its own moment, once. */
   /** Marathon's guideline finish line: 150 lines. The run carries on. */
   function checkMarathonGoal() {
     const g = app.game;
@@ -1578,11 +1653,13 @@
     checkAchievements(false);
   }
 
+  /** Passing your best score mid-run gets its own moment, once. */
   function checkLiveBest() {
     const g = app.game;
     if (!g || app.pbBeaten || !app.pbScore || g.score <= app.pbScore || g.state !== 'playing') return;
     app.pbBeaten = true;
     callout('NEW BEST', 'Past ' + fmtInt(app.pbScore), 'best');
+    els.st.main.parentElement.classList.add('is-best');
     Audio.play('achievement');
     wall.pulse(0.6);
     haptic([10, 40, 10]);
@@ -1645,18 +1722,29 @@
     const parts = [];
     if (ev.b2b) parts.push('B2B' + (ev.b2bCount > 1 ? ' ×' + ev.b2bCount : ''));
     if (ev.combo >= 1) parts.push(ev.combo + ' COMBO');
-    if (ev.points > 0 && (main || parts.length) && !ev.perfectClear) parts.push('+' + fmtInt(ev.points));
+    if (ev.points > 0 && (main || parts.length)) parts.push('+' + fmtInt(ev.points));
     if (ev.perfectClear) {
-      callout('PERFECT CLEAR', '+' + fmtInt(ev.points), 'pc');
+      callout('PERFECT CLEAR', [main].concat(parts).filter(Boolean).join('  ·  ') || '+' + fmtInt(ev.points), 'pc');
     } else if (main || parts.length) {
       callout(main, parts.join('  ·  '), cls);
     }
   }
 
+  // Callout importance: when two have to share the board, the lesser goes.
+  const CALLOUT_PRIO = { pc: 4, best: 3, level: 1 };
+
   function callout(main, sub, cls) {
     const box = els.callouts;
-    while (box.children.length >= 2) box.firstChild.remove();
+    const prio = CALLOUT_PRIO[cls] || 2;
+    while (box.children.length >= 2) {
+      let drop = box.firstElementChild;
+      for (const c of box.children) if ((c._prio || 2) < (drop._prio || 2)) drop = c;
+      if ((drop._prio || 2) > prio) return null;
+      drop.remove();
+    }
     const el = document.createElement('div');
+    el._prio = prio;
+    el._at = performance.now();
     el.className = 'callout' + (cls ? ' callout-' + cls : '');
     if (main) {
       const m = document.createElement('div');
@@ -1677,6 +1765,21 @@
       if (e.target === el) done();
     });
     setTimeout(done, 2200);
+    return el;
+  }
+
+  /** Adds a line to the newest callout if it appeared this very moment. */
+  function appendToLatestCallout(text) {
+    const last = els.callouts.lastElementChild;
+    if (!last || performance.now() - last._at > 60) return false;
+    let s = last.querySelector('.callout-sub');
+    if (!s) {
+      s = document.createElement('div');
+      s.className = 'callout-sub';
+      last.appendChild(s);
+    }
+    s.textContent = s.textContent ? s.textContent + '  ·  ' + text : text;
+    return true;
   }
 
   function bump(strength, side) {
@@ -1756,7 +1859,7 @@
         if (daily.streak >= 3) u('streak3');
         if (daily.streak >= 7) u('streak7');
         if (daily.streak >= 30) u('streak30');
-        if (S.dailyMedal(daily.days[app.dailyKey || S.dayKey()] || 0).got === S.DAILY_MEDALS[2]) u('gold');
+        if ((S.dailyMedal(daily.days[app.dailyKey || S.dayKey()] || 0, app.dailyKey || S.dayKey()).got || {}).id === 'gold') u('gold');
       }
     }
     if (got.length) {
@@ -1780,6 +1883,11 @@
     if (app.runUnlocks.indexOf(id) === -1) app.runUnlocks.push(id);
     toastQueue.push({ id, title: 'Achievement · ' + a.name, body: a.desc, icon: 'i-star', sound: 'achievement' });
     pumpToasts();
+  }
+
+  function storageNotice(body) {
+    toastQueue.push({ id: 'tab', title: 'Heads up', body, icon: 'i-lock' });
+    setTimeout(pumpToasts, 400);
   }
 
   let storageWarned = false;
@@ -1824,7 +1932,7 @@
 
   function configureHud() {
     const info = MODE_INFO[app.mode];
-    els.modeName.textContent = info.name + (app.dailyKey ? ' · ' + prettyDay(app.dailyKey) : '');
+    els.modeName.textContent = info.name + (app.dailyKey ? ' · ' + S.dailyVariant(app.dailyKey).name : '');
     els.modePill.style.setProperty('--tint', info.tint);
     els.goal.style.setProperty('--tint', info.tint);
     const L = {
@@ -1840,6 +1948,7 @@
     els.st.bL.textContent = L[2];
     els.st.cL.textContent = L[3];
     els.st.c.classList.remove('is-ahead', 'is-behind');
+    els.st.main.parentElement.classList.toggle('is-best', !!app.pbBeaten);
     app.hud = {};
   }
 
@@ -1896,7 +2005,7 @@
         c = String(g.level);
         if (g.mode === 'daily') {
           // The next medal to reach, live.
-          const next = S.dailyMedal(g.score).next;
+          const next = S.dailyMedal(g.score, app.dailyKey).next;
           cLabel = next ? next.name : 'Gold';
           c = next ? fmtInt(next.score) : '✓';
         }
@@ -1989,7 +2098,9 @@
 
     input.update(dt);
     if (app.screen === 'countdown' && app.countdown) updateCountdown(now);
-    if (app.screen === 'playing' && app.game) {
+    if (app.screen === 'playing' && app.game && app.skipFrame) {
+      app.skipFrame = false;
+    } else if (app.screen === 'playing' && app.game) {
       // ...but the clock keeps real time through a hitch (Sprint/Ultra records).
       const g = app.game;
       if (raw > dt && g.state === 'playing') g.time += Math.min(raw - dt, 1000);
@@ -2667,6 +2778,16 @@
     if (t && t.type === 'range' && (dir === 'left' || dir === 'right')) return;
     e.preventDefault();
     app.keyboardNav = true;
+    // Tabs: Left/Right move along the tab row (wrapping), as ARIA expects.
+    if (t && t.getAttribute && t.getAttribute('role') === 'tab' && (dir === 'left' || dir === 'right')) {
+      const tabs = $$('[role="tab"]', t.closest('[role="tablist"]'));
+      const i = tabs.indexOf(t);
+      const next = tabs[(i + (dir === 'right' ? 1 : -1) + tabs.length) % tabs.length];
+      next.focus();
+      selectTab(next);
+      Audio.play('ui');
+      return;
+    }
     spatialNav(dir);
   }
 
@@ -3114,7 +3235,13 @@
     window.addEventListener('storage', (e) => {
       if (!e.key || e.key.indexOf('lgtetris.') !== 0) return;
       if (e.key === S.KEYS.records) S.syncInto(records, S.loadRecords());
-      else if (e.key === S.KEYS.profile) S.syncInto(profile, S.loadProfile());
+      else if (e.key === S.KEYS.profile) {
+        const before = S.playerXP(profile);
+        S.syncInto(profile, S.loadProfile());
+        if (typeof app.xpStart === 'number') app.xpStart += S.playerXP(profile) - before;
+      } else if (e.key.indexOf(S.KEYS.save) === 0) {
+        // A saved run was used or cleared elsewhere: the banner must follow.
+      }
       else if (e.key === S.KEYS.daily) daily = S.loadDaily();
       else if (e.key === S.KEYS.recent) recent = S.loadRecent();
       else return;

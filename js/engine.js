@@ -189,7 +189,10 @@
     constructor(options = {}) {
       this.mode = MODES[options.mode] ? options.mode : 'marathon';
       this.rules = MODES[this.mode];
-      this.startLevel = this.rules.startLevel ? clamp(Math.floor(options.startLevel || 1), 1, 20) : 1;
+      this.startLevel = this.rules.startLevel || options.forceStartLevel ? clamp(Math.floor(options.startLevel || 1), 1, 20) : 1;
+      // Daily Challenge variations: garbage to start with, or no hold.
+      this.extraGarbage = clamp(Math.floor(options.garbage || 0), 0, 12);
+      this.noHold = !!options.noHold;
       this.seed = (options.seed == null ? Math.floor(Math.random() * 4294967296) : options.seed) >>> 0;
       this.lockDelay = options.lockDelay == null ? 500 : options.lockDelay;
       this.maxLockResets = options.maxLockResets == null ? 15 : options.maxLockResets;
@@ -241,6 +244,7 @@
       this.lastKickTST = false;
       this.garbageLeft = 0;
       if (this.rules.goalGarbage) this.addGarbage(this.rules.goalGarbage);
+      else if (this.extraGarbage) this.addGarbage(this.extraGarbage);
     }
 
     /** Fills the bottom with rows of garbage, one hole each. Holes move
@@ -551,7 +555,7 @@
     }
 
     hold() {
-      if (!this.canControl() || this.holdUsed) return false;
+      if (!this.canControl() || this.holdUsed || this.noHold) return false;
       const current = this.active.type;
       const swapIn = this.holdType;
       this.active = null;
